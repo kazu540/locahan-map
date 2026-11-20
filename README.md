@@ -13,3 +13,4 @@
 - [SunCalc](https://github.com/mourner/suncalc)（太陽の位置の計算）— BSD 2-Clause License。`vendor/suncalc.js` に同梱しています。
 - [Leaflet](https://leafletjs.com/)（地図の表示）— BSD 2-Clause License。`vendor/leaflet/` に同梱しています。
 - 地図データ：© [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors（ODbL）
+- 天気：[Open-Meteo](https://open-meteo.com/)（無料・登録不要。CC BY 4.0）。天気を取得するときだけ、記録した場所の緯度・経度と日付をOpen-Meteoに送ります。写真やメモは送りません。

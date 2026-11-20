@@ -11,8 +11,9 @@ import {
   dayChartSVG, hourlyTable,
 } from './light.js';
 import * as mapView from './map.js';
+import { fetchWeather, manualWeather, weatherText, weatherIcon, MANUAL_KINDS, KINDS } from './weather.js';
 
-const APP_VERSION = '0.6.0（段階6：絞り込みと光のシミュレーション）';
+const APP_VERSION = '0.6.5（天気の自動記録）';
 const DEFAULT_TAGS = ['歩道橋', '坂', '人が少ない', '階段', '路地', '川沿い', '夜景向き'];
 
 const $ = (id) => document.getElementById(id);
@@ -152,6 +153,87 @@ function currentLocation() {
   return { lat: rec.lat, lng: rec.lng, accuracy: rec.accuracy, source: rec.source };
 }
 
+/* 天気 */
+let weatherReqNo = 0;
+let weatherTimer;
+function setWeatherUI(state, w, msg) {
+  const icon = $('wx-icon');
+  icon.className = `badge-icon ${state === 'loading' ? 'loading' : 'neutral'}`;
+  icon.innerHTML = state === 'ok' ? weatherIcon(w.kind, 20) : state === 'loading' ? '' : weatherIcon('cloudy', 20);
+  if (state === 'ok') {
+    $('wx-title').textContent = w.label + (w.source === 'manual' ? '（手で選択）' : '');
+    $('wx-sub').textContent = [w.temp != null ? `気温 ${Math.round(w.temp)}℃` : '', w.cloud != null ? `雲の量 ${w.cloud}%` : ''].filter(Boolean).join('・');
+  } else if (state === 'loading') {
+    $('wx-title').textContent = '天気を取得しています…';
+    $('wx-sub').textContent = '';
+  } else {
+    $('wx-title').textContent = '天気';
+    $('wx-sub').textContent = msg || '';
+  }
+}
+
+function requestRecWeather({ force = false } = {}) {
+  clearTimeout(weatherTimer);
+  if (rec.weather && rec.weather.source === 'manual' && !force) return;
+  const loc = currentLocation();
+  if (loc.lat === null || loc.lng === null) {
+    rec.weather = null;
+    setWeatherUI('none', null, '場所が決まると自動で取得します');
+    return;
+  }
+  const myNo = ++weatherReqNo;
+  setWeatherUI('loading');
+  weatherTimer = setTimeout(async () => {
+    try {
+      const w = await fetchWeather(loc.lat, loc.lng, rec.time);
+      if (myNo !== weatherReqNo) return;
+      rec.weather = w;
+      setWeatherUI('ok', w);
+    } catch (e) {
+      if (myNo !== weatherReqNo) return;
+      rec.weather = null;
+      setWeatherUI('none', null, navigator.onLine
+        ? '取得できませんでした。保存後に自動で取り直します'
+        : '電波がないため、電波が戻ったら自動で取得します');
+    }
+  }, 400);
+}
+
+function renderWeatherManual() {
+  const box = $('wx-manual');
+  box.textContent = '';
+  for (const k of MANUAL_KINDS) {
+    const b = el('button', 'qchip wx-chip');
+    b.type = 'button';
+    b.innerHTML = weatherIcon(k, 18);
+    b.append(document.createTextNode(KINDS[k].label));
+    b.setAttribute('aria-pressed', rec.weather && rec.weather.source === 'manual' && rec.weather.kind === k ? 'true' : 'false');
+    b.addEventListener('click', () => {
+      weatherReqNo++;
+      rec.weather = manualWeather(k);
+      setWeatherUI('ok', rec.weather);
+      box.hidden = true;
+      $('wx-edit').textContent = '変更';
+    });
+    box.append(b);
+  }
+  const auto = el('button', 'qchip', '自動で取得し直す');
+  auto.type = 'button';
+  auto.addEventListener('click', () => {
+    rec.weather = null;
+    box.hidden = true;
+    $('wx-edit').textContent = '変更';
+    requestRecWeather({ force: true });
+  });
+  box.append(auto);
+}
+$('wx-edit').addEventListener('click', () => {
+  const box = $('wx-manual');
+  if (box.hidden) renderWeatherManual();
+  box.hidden = !box.hidden;
+  $('wx-edit').textContent = box.hidden ? '変更' : '閉じる';
+});
+
 function updateRecLight() {
   const loc = currentLocation();
   renderLightPanel($('rec-light'), { date: rec.time, lat: loc.lat, lng: loc.lng, heading: rec.heading });
@@ -194,6 +276,7 @@ function getLocation() {
       `${rec.lat.toFixed(5)}, ${rec.lng.toFixed(5)} ・ 誤差 約${Math.round(rec.accuracy)}m`);
     updateSaveButton();
     updateRecLight();
+    requestRecWeather();
   }, (err) => {
     if (myNo !== geoRequestNo) return;
     let help;
@@ -323,6 +406,11 @@ function resetForm() {
   rec.tags = new Set();
   rec.source = null;
   rec.heading = null;
+  rec.weather = null;
+  weatherReqNo++;
+  $('wx-manual').hidden = true;
+  $('wx-edit').textContent = '変更';
+  setWeatherUI('none', null, '場所が決まると自動で取得します');
   $('manual-lat').value = '';
   $('manual-lng').value = '';
   $('f-title').value = '';
@@ -356,6 +444,12 @@ async function openEdit(id) {
   $('record-title').textContent = '記録を編集';
   rec.lat = s.lat; rec.lng = s.lng; rec.accuracy = s.accuracy; rec.source = s.locationSource;
   rec.heading = s.heading ?? null;
+  if (s.weather && s.weather.status === 'ok') {
+    rec.weather = s.weather;
+    setWeatherUI('ok', s.weather);
+  } else {
+    requestRecWeather();
+  }
   showManual(false);
   setLocStatus('ok', '記録した位置', `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`);
   $('loc-retry').hidden = true;
@@ -410,12 +504,14 @@ async function saveRecord() {
       route: $('f-route').value.trim(),
       tags: tagsInOrder,
       heading: rec.heading,
+      weather: rec.weather && rec.weather.status === 'ok' ? rec.weather : { status: 'pending', tries: 0 },
       light: lightSnapshot(rec.time, loc.lat, loc.lng),
       photoIds: rec.photos.map((p) => p.id),
       updatedAt: now,
     };
     await putSpot(spot);
     requestPersist();
+    if (spot.weather.status === 'pending') setTimeout(fillPendingWeather, 1500);
     const wasEdit = rec.mode === 'edit';
     closeSheet();
     toast(wasEdit ? '変更を保存しました' : '保存しました');
@@ -435,8 +531,14 @@ $('record-cancel').addEventListener('click', () => { geoRequestNo++; closeSheet(
 $('record-save').addEventListener('click', saveRecord);
 $('record-save-bottom').addEventListener('click', saveRecord);
 $('loc-retry').addEventListener('click', getLocation);
-$('manual-lat').addEventListener('input', () => { updateSaveButton(); updateRecLight(); });
-$('manual-lng').addEventListener('input', () => { updateSaveButton(); updateRecLight(); });
+function onManualInput() {
+  updateSaveButton();
+  updateRecLight();
+  clearTimeout(weatherTimer);
+  weatherTimer = setTimeout(() => requestRecWeather(), 800);
+}
+$('manual-lat').addEventListener('input', onManualInput);
+$('manual-lng').addEventListener('input', onManualInput);
 $('time-edit').addEventListener('click', () => {
   const f = $('time-field');
   f.hidden = !f.hidden;
@@ -448,6 +550,7 @@ $('time-input').addEventListener('change', () => {
     rec.time = d;
     $('time-text').textContent = formatFull(d);
     updateRecLight();
+    requestRecWeather();
   }
 });
 
@@ -611,7 +714,8 @@ function showSpotPanel(id) {
     ph.innerHTML = ICONS.camera;
   }
   $('ps-name').textContent = s.title || formatShort(new Date(s.createdAt));
-  $('ps-time').textContent = `${formatFull(new Date(s.createdAt))} に記録`;
+  $('ps-time').textContent = `${formatFull(new Date(s.createdAt))} に記録` +
+    (s.weather && s.weather.status === 'ok' ? `・${weatherText(s.weather)}` : '');
   const tags = $('ps-tags');
   tags.textContent = '';
   for (const t of s.tags || []) tags.append(el('span', 'tag-label', t));
@@ -699,6 +803,22 @@ async function openDetail(id) {
 
   $('detail-name').textContent = s.title || formatShort(new Date(s.createdAt));
   $('detail-time').textContent = `${formatFull(new Date(s.createdAt))} に記録`;
+
+  const dw = $('detail-weather');
+  dw.textContent = '';
+  if (s.weather && s.weather.status === 'ok') {
+    dw.innerHTML = weatherIcon(s.weather.kind, 20);
+    dw.append(el('span', 'num', weatherText(s.weather)));
+    dw.hidden = false;
+  } else if (s.weather && s.weather.status === 'pending') {
+    dw.innerHTML = weatherIcon('cloudy', 20);
+    dw.append(el('span', '', '天気は電波があるときに自動で取得します'));
+    dw.classList.add('muted');
+    dw.hidden = false;
+  } else {
+    dw.hidden = true;
+  }
+  if (s.weather && s.weather.status === 'ok') dw.classList.remove('muted');
 
   const tags = $('detail-tags');
   tags.textContent = '';
@@ -829,8 +949,35 @@ $('delete-yes').addEventListener('click', async () => {
 
 /* ---------- 起動 ---------- */
 $('app-version').textContent = APP_VERSION;
+/* 天気がまだの記録を、電波があるときに取得する */
+let filling = false;
+async function fillPendingWeather() {
+  if (filling || !navigator.onLine) return;
+  filling = true;
+  let changed = false;
+  try {
+    const spots = await getAllSpots();
+    const todo = spots.filter((s) => !s.weather || s.weather.status === 'pending').slice(0, 20);
+    for (const s of todo) {
+      const tries = (s.weather && s.weather.tries) || 0;
+      try {
+        s.weather = await fetchWeather(s.lat, s.lng, new Date(s.createdAt));
+      } catch (e) {
+        if (!navigator.onLine) break;
+        s.weather = tries >= 2 ? { status: 'none' } : { status: 'pending', tries: tries + 1 };
+      }
+      delete s.thumbUrl;
+      await putSpot(s);
+      changed = true;
+    }
+  } catch (e) { /* 次の機会に */ }
+  filling = false;
+  if (changed) await renderList();
+}
+window.addEventListener('online', () => setTimeout(fillPendingWeather, 2000));
+
 renderToday();
-loadTags().then(() => renderList({ fit: true }));
+loadTags().then(() => renderList({ fit: true })).then(() => setTimeout(fillPendingWeather, 3000));
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

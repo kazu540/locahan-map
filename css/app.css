@@ -504,6 +504,13 @@ button:disabled { opacity: 0.4; cursor: default; }
 .hourly th { text-align: left; font-size: 12px; color: var(--text-2); font-weight: 600; padding: 6px 4px; border-bottom: 0.5px solid var(--sep); }
 .hourly td { padding: 8px 4px; border-bottom: 0.5px solid var(--sep); }
 
+/* 天気 */
+.weather-pill { display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 18px; background: var(--surface); box-shadow: var(--card-shadow); font-size: 15px; font-weight: 600; color: var(--text); }
+.weather-pill.muted { color: var(--text-2); font-weight: 500; font-size: 13px; }
+.weather-pill svg { color: var(--accent-text); flex-shrink: 0; }
+.wx-chip { display: inline-flex; align-items: center; gap: 6px; }
+.wx-chip[aria-pressed="true"] { background: var(--accent); color: #FFFFFF; }
+
 /* お知らせ */
 .toast {
   position: fixed; z-index: 50; left: 50%;

@@ -172,6 +172,16 @@
         <span>日時（日本時間）</span>
         <input id="time-input" type="datetime-local">
       </label>
+      <div class="sep"></div>
+      <div class="info-row">
+        <div id="wx-icon" class="badge-icon neutral" aria-hidden="true"></div>
+        <div class="info-text">
+          <span id="wx-title" class="info-title">天気</span>
+          <span id="wx-sub" class="info-sub num"></span>
+        </div>
+        <button id="wx-edit" class="text-btn" type="button">変更</button>
+      </div>
+      <div id="wx-manual" class="quick-row" role="group" aria-label="天気を選ぶ" hidden></div>
     </div>
 
     <section class="form-section" aria-labelledby="photo-h">
@@ -239,6 +249,7 @@
       <h2 id="detail-name" class="detail-name"></h2>
       <span id="detail-time" class="subtle num"></span>
     </div>
+    <div id="detail-weather" class="weather-pill"></div>
     <div id="detail-tags" class="tag-wrap"></div>
 
     <div id="detail-memo-card" class="card text-card">
