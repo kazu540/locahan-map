@@ -1337,7 +1337,17 @@ async function fillPendingWeather() {
 window.addEventListener('online', () => setTimeout(fillPendingWeather, 2000));
 
 renderToday();
-loadTags().then(() => renderList({ fit: true })).then(() => setTimeout(fillPendingWeather, 3000));
+// 起動時は地図を現在地に合わせる（取得できないときは記録全体を表示）
+function locateOnStartup() {
+  const fallback = () => { if (spotsCache.length) mapView.fitAll(); };
+  if (!window.isSecureContext || !('geolocation' in navigator)) { fallback(); return; }
+  navigator.geolocation.getCurrentPosition(
+    (p) => mapView.showMe(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
+    fallback,
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+  );
+}
+loadTags().then(() => renderList()).then(locateOnStartup).then(() => setTimeout(fillPendingWeather, 3000));
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
