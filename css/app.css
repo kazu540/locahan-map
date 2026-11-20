@@ -511,6 +511,21 @@ button:disabled { opacity: 0.4; cursor: default; }
 .wx-chip { display: inline-flex; align-items: center; gap: 6px; }
 .wx-chip[aria-pressed="true"] { background: var(--accent); color: #FFFFFF; }
 
+/* 撮る向き */
+.dir-card { display: flex; flex-direction: column; gap: 12px; border-radius: 26px; padding: 16px; }
+.dir-card > div { display: flex; flex-direction: column; gap: 12px; }
+.dir-card .big-btn.secondary { background: var(--surface-2); box-shadow: none; }
+.dir-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dir-live { display: flex !important; flex-direction: row !important; align-items: center; gap: 16px; }
+.dir-live-compass { width: 140px; flex-shrink: 0; }
+.dir-live-compass .viz { max-width: 140px; }
+.dir-live-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dir-live-num { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; }
+.dir-live-type { font-size: 15px; font-weight: 700; color: var(--accent-text); }
+.dir-chips { display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.qchip[aria-pressed="true"] { background: var(--accent); color: #FFFFFF; }
+.slider.plain::-webkit-slider-runnable-track { background: var(--surface-2); }
+
 /* お知らせ */
 .toast {
   position: fixed; z-index: 50; left: 50%;

@@ -8,12 +8,13 @@ import { processPhoto } from './photos.js';
 import { renderLightPanel } from './lightpanel.js';
 import {
   lightSnapshot, sunPosition, dayTimes, dirName, altitudeWord, compassSVG, altitudeSVG, timelineEl,
-  dayChartSVG, hourlyTable,
+  dayChartSVG, hourlyTable, lightType, riseSetAzimuth,
 } from './light.js';
 import * as mapView from './map.js';
+import { startCompass, stopCompass } from './compass.js';
 import { fetchWeather, manualWeather, weatherText, weatherIcon, MANUAL_KINDS, KINDS } from './weather.js';
 
-const APP_VERSION = '0.6.5（天気の自動記録）';
+const APP_VERSION = '0.7.0（段階7：向きと順光・逆光）';
 const DEFAULT_TAGS = ['歩道橋', '坂', '人が少ない', '階段', '路地', '川沿い', '夜景向き'];
 
 const $ = (id) => document.getElementById(id);
@@ -92,6 +93,7 @@ function openSheet(sheet) {
   document.body.style.overflow = 'hidden';
 }
 function closeSheet() {
+  stopCompass();
   const sheet = openSheetEl;
   if (!sheet) return;
   openSheetEl = null;
@@ -152,6 +154,119 @@ function currentLocation() {
   }
   return { lat: rec.lat, lng: rec.lng, accuracy: rec.accuracy, source: rec.source };
 }
+
+/* 撮る向き（コンパス） */
+const DIR8 = [['北', 0], ['北東', 45], ['東', 90], ['南東', 135], ['南', 180], ['南西', 225], ['西', 270], ['北西', 315]];
+let liveHeading = null;
+let liveFrame = 0;
+let liveAcc = null;
+
+function showDir(state) {
+  $('dir-none').hidden = state !== 'none';
+  $('dir-live').hidden = state !== 'live';
+  $('dir-set').hidden = state !== 'set';
+  $('dir-manual').hidden = state !== 'manual';
+  if (state === 'set') {
+    $('dir-set-title').textContent = `向き ${Math.round(rec.heading)}° ${dirName(rec.heading)}`;
+    $('dir-set-sub').textContent = rec.headingSource === 'manual' ? '手で選択' : 'コンパスで測定';
+  }
+}
+
+function sunForRec() {
+  const loc = currentLocation();
+  if (loc.lat === null || loc.lng === null) return null;
+  const pos = sunPosition(rec.time, loc.lat, loc.lng);
+  return { pos, arc: riseSetAzimuth(dayTimes(rec.time, loc.lat, loc.lng), loc.lat, loc.lng) };
+}
+
+function drawLive() {
+  liveFrame = 0;
+  if (liveHeading === null) return;
+  const sun = sunForRec();
+  const box = $('dir-live-compass');
+  box.textContent = '';
+  box.append(sun ? compassSVG(sun.pos.azimuth, sun.pos.altitude, liveHeading, sun.arc) : compassSVG(0, -90, liveHeading));
+  $('dir-live-num').textContent = `${Math.round(liveHeading)}° ${dirName(liveHeading)}`;
+  const lt = sun ? lightType(liveHeading, sun.pos.azimuth, sun.pos.altitude) : null;
+  $('dir-live-type').textContent = lt ? `この向きだと「${lt.label}」` : '';
+  $('dir-live-hint').textContent = liveAcc != null && liveAcc > 25
+    ? `向きの精度が低めです（±${Math.round(liveAcc)}°）。iPhoneを大きく8の字に動かすと良くなります。`
+    : '撮影するときのようにiPhoneを構えて、カメラを撮りたい方向へ向けてください。';
+  $('dir-live-ok').disabled = false;
+}
+
+$('dir-measure').addEventListener('click', measureDirection);
+$('dir-remeasure').addEventListener('click', measureDirection);
+function measureDirection() {
+  liveHeading = null;
+  liveAcc = null;
+  $('dir-live-ok').disabled = true;
+  $('dir-live-num').textContent = '—';
+  $('dir-live-type').textContent = '';
+  $('dir-live-compass').textContent = '';
+  $('dir-live-hint').textContent = 'コンパスを準備しています…';
+  showDir('live');
+  startCompass((h, acc) => {
+    liveHeading = h;
+    liveAcc = acc;
+    if (!liveFrame) liveFrame = requestAnimationFrame(drawLive);
+  }, (reason) => {
+    toast(reason === 'denied'
+      ? 'コンパスの利用が許可されませんでした。手で選べます'
+      : 'この端末ではコンパスが使えません。手で選べます');
+    openDirManual();
+  });
+}
+$('dir-live-ok').addEventListener('click', () => {
+  if (liveHeading === null) return;
+  stopCompass();
+  rec.heading = Math.round(liveHeading);
+  rec.headingSource = 'compass';
+  showDir('set');
+  updateRecLight();
+});
+$('dir-live-cancel').addEventListener('click', () => {
+  stopCompass();
+  showDir(rec.heading != null ? 'set' : 'none');
+});
+
+function setDirSlider(deg) {
+  $('dir-slider').value = String(deg);
+  $('dir-slider-out').textContent = `${deg}° ${dirName(deg)}`;
+  document.querySelectorAll('#dir-chips .qchip').forEach((b) => {
+    b.setAttribute('aria-pressed', Number(b.dataset.deg) === deg ? 'true' : 'false');
+  });
+}
+function openDirManual() {
+  stopCompass();
+  const box = $('dir-chips');
+  if (!box.children.length) {
+    for (const [name, deg] of DIR8) {
+      const b = el('button', 'qchip', name);
+      b.type = 'button';
+      b.dataset.deg = String(deg);
+      b.addEventListener('click', () => setDirSlider(deg));
+      box.append(b);
+    }
+  }
+  setDirSlider(rec.heading != null ? Math.round(rec.heading / 5) * 5 % 360 : 0);
+  showDir('manual');
+}
+$('dir-manual-btn').addEventListener('click', openDirManual);
+$('dir-manual-btn2').addEventListener('click', openDirManual);
+$('dir-slider').addEventListener('input', () => setDirSlider(Number($('dir-slider').value)));
+$('dir-manual-ok').addEventListener('click', () => {
+  rec.heading = Number($('dir-slider').value);
+  rec.headingSource = 'manual';
+  showDir('set');
+  updateRecLight();
+});
+$('dir-clear').addEventListener('click', () => {
+  rec.heading = null;
+  rec.headingSource = null;
+  showDir('none');
+  updateRecLight();
+});
 
 /* 天気 */
 let weatherReqNo = 0;
@@ -406,6 +521,9 @@ function resetForm() {
   rec.tags = new Set();
   rec.source = null;
   rec.heading = null;
+  rec.headingSource = null;
+  stopCompass();
+  showDir('none');
   rec.weather = null;
   weatherReqNo++;
   $('wx-manual').hidden = true;
@@ -444,6 +562,8 @@ async function openEdit(id) {
   $('record-title').textContent = '記録を編集';
   rec.lat = s.lat; rec.lng = s.lng; rec.accuracy = s.accuracy; rec.source = s.locationSource;
   rec.heading = s.heading ?? null;
+  rec.headingSource = s.headingSource || (rec.heading != null ? 'compass' : null);
+  showDir(rec.heading != null ? 'set' : 'none');
   if (s.weather && s.weather.status === 'ok') {
     rec.weather = s.weather;
     setWeatherUI('ok', s.weather);
@@ -504,6 +624,7 @@ async function saveRecord() {
       route: $('f-route').value.trim(),
       tags: tagsInOrder,
       heading: rec.heading,
+      headingSource: rec.headingSource,
       weather: rec.weather && rec.weather.status === 'ok' ? rec.weather : { status: 'pending', tries: 0 },
       light: lightSnapshot(rec.time, loc.lat, loc.lng),
       photoIds: rec.photos.map((p) => p.id),
