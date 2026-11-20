@@ -20,9 +20,11 @@ export function initMap(h) {
     worldCopyJump: true,
   }).setView(TOKYO, 12);
 
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+  // 絵柄：CARTO Voyager（Googleマップに近いすっきりした配色。高解像度画面ではくっきり版を使う）
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    maxZoom: 20,
+    subdomains: 'abcd',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
   }).addTo(map);
   L.control.attribution({ position: 'topleft', prefix: false }).addTo(map);
 
