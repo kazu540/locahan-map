@@ -93,13 +93,20 @@ function polar(cx, cy, r, deg) {
 }
 
 // コンパス：太陽の方位（オレンジの丸）と、カメラの向き（線）
-export function compassSVG(sunAz, sunAlt, heading) {
+export function compassSVG(sunAz, sunAlt, heading, dayArc = null) {
   const s = svgEl('svg', { viewBox: '0 0 100 100', width: '100', height: '100', class: 'viz' });
   const label = `太陽は${dirName(sunAz)}（${Math.round(sunAz)}度）` +
     (heading != null ? `、カメラは${dirName(heading)}（${Math.round(heading)}度）を向いている` : '');
   s.setAttribute('role', 'img');
   s.setAttribute('aria-label', label);
   s.append(svgEl('circle', { cx: 50, cy: 50, r: 38, class: 'viz-track', fill: 'none' }));
+  if (dayArc && dayArc.rise != null && dayArc.set != null) {
+    // この日の太陽が通る方角の範囲（日の出〜日没）
+    const span = ((dayArc.set - dayArc.rise) + 360) % 360;
+    const [ax, ay] = polar(50, 50, 38, dayArc.rise);
+    const [bx, by] = polar(50, 50, 38, dayArc.set);
+    s.append(svgEl('path', { d: `M${ax} ${ay} A38 38 0 ${span > 180 ? 1 : 0} 1 ${bx} ${by}`, class: 'viz-dayarc', fill: 'none' }));
+  }
   for (let d = 0; d < 360; d += 30) {
     const [x1, y1] = polar(50, 50, 38, d);
     const [x2, y2] = polar(50, 50, d % 90 === 0 ? 32 : 35, d);
@@ -181,4 +188,88 @@ export function timelineEl(times, now, fmtTime) {
   }
   wrap.append(bar);
   return wrap;
+}
+
+/* ---------- 1日の太陽の動き ---------- */
+// 日の出・日没の方位（コンパスに表示する範囲）
+export function riseSetAzimuth(times, lat, lng) {
+  if (!times.sunrise || !times.sunset) return null;
+  return {
+    rise: sunPosition(times.sunrise, lat, lng).azimuth,
+    set: sunPosition(times.sunset, lat, lng).azimuth,
+  };
+}
+
+// 1時間ごとの高さと方位
+export function hourlyTable(times, lat, lng) {
+  if (!times.sunrise || !times.sunset) return [];
+  const H = 3600000;
+  const rows = [];
+  const start = Math.ceil((times.sunrise.getTime() - 1) / H) * H;
+  for (let t = start; t <= times.sunset.getTime(); t += H) {
+    const d = new Date(t);
+    rows.push({ date: d, ...sunPosition(d, lat, lng) });
+  }
+  return rows;
+}
+
+// 高さのグラフ（横＝時刻、縦＝太陽の高さ）。タップした時刻を onPick で返す
+export function dayChartSVG(times, lat, lng, selected, fmtTime, onPick) {
+  const W = 340, H = 170, L = 30, R = 10, T = 14, B = 26;
+  const s = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'day-chart' });
+  if (!times.sunrise || !times.sunset) return s;
+  const start = times.sunrise.getTime() - 60 * 60000;
+  const end = times.sunset.getTime() + 60 * 60000;
+  const samples = [];
+  for (let t = start; t <= end; t += 5 * 60000) samples.push([t, sunPosition(new Date(t), lat, lng).altitude]);
+  const maxAlt = Math.max(...samples.map((x) => x[1]));
+  const yMin = -10;
+  const yMax = Math.max(30, Math.ceil((maxAlt + 5) / 10) * 10);
+  const x = (t) => L + ((t - start) / (end - start)) * (W - L - R);
+  const y = (a) => T + ((yMax - a) / (yMax - yMin)) * (H - T - B);
+  s.setAttribute('role', 'img');
+  s.setAttribute('aria-label', `この日の太陽の高さの変化。最も高いときで${Math.round(maxAlt)}度`);
+
+  // ゴールデンアワーの帯（高さ0〜6度）
+  s.append(svgEl('rect', { x: L, y: y(6), width: W - L - R, height: y(0) - y(6), class: 'dc-golden' }));
+  // 目盛り
+  for (let a = 0; a <= yMax; a += yMax > 40 ? 20 : 10) {
+    s.append(svgEl('line', { x1: L, x2: W - R, y1: y(a), y2: y(a), class: a === 0 ? 'dc-horizon' : 'dc-grid' }));
+    const tx = svgEl('text', { x: L - 5, y: y(a) + 3.5, 'text-anchor': 'end', class: 'dc-label' });
+    tx.textContent = `${a}°`;
+    s.append(tx);
+  }
+  const HOUR = 3600000;
+  const step = (end - start) / HOUR > 12 ? 3 : 2;
+  for (let t = Math.ceil(start / HOUR) * HOUR; t <= end; t += HOUR) {
+    const hourJst = new Date(t + 9 * HOUR).getUTCHours();
+    if (hourJst % step) continue;
+    s.append(svgEl('line', { x1: x(t), x2: x(t), y1: T, y2: H - B, class: 'dc-grid' }));
+    const tx = svgEl('text', { x: x(t), y: H - 8, 'text-anchor': 'middle', class: 'dc-label' });
+    tx.textContent = `${hourJst}時`;
+    s.append(tx);
+  }
+  // 曲線
+  const d = samples.map(([t, a], i) => `${i ? 'L' : 'M'}${x(t).toFixed(1)} ${y(a).toFixed(1)}`).join(' ');
+  s.append(svgEl('path', { d: `${d} L${x(end)} ${y(yMin)} L${x(start)} ${y(yMin)} Z`, class: 'dc-area' }));
+  s.append(svgEl('path', { d, class: 'dc-line', fill: 'none' }));
+  // 選んだ時刻
+  if (selected) {
+    const st = selected.getTime();
+    if (st >= start && st <= end) {
+      const a = sunPosition(selected, lat, lng).altitude;
+      s.append(svgEl('line', { x1: x(st), x2: x(st), y1: T, y2: H - B, class: 'dc-cursor' }));
+      s.append(svgEl('circle', { cx: x(st), cy: y(a), r: 6, class: 'viz-sun ring' }));
+    }
+  }
+  if (onPick) {
+    s.classList.add('pickable');
+    s.addEventListener('click', (e) => {
+      const r = s.getBoundingClientRect();
+      const px = ((e.clientX - r.left) / r.width) * W;
+      const t = start + ((px - L) / (W - L - R)) * (end - start);
+      onPick(new Date(Math.max(start, Math.min(end, t))));
+    });
+  }
+  return s;
 }

@@ -24,6 +24,7 @@
   <!-- 地図 -->
   <section id="view-map" class="view-map" aria-label="地図">
     <div id="map" class="map"></div>
+    <div id="map-filter" class="filter-row map-filter" role="group" aria-label="タグで絞り込み"></div>
 
     <div class="map-controls glass">
       <button id="map-locate" type="button" aria-label="現在地へ移動">
@@ -70,6 +71,11 @@
       <h1 id="list-title">ロケ地</h1>
       <p id="list-count" class="subtle"></p>
     </header>
+    <div id="list-filter" class="filter-row list-filter" role="group" aria-label="タグで絞り込み"></div>
+    <div id="filter-empty" class="empty" hidden>
+      <p class="empty-title">条件に合う記録がありません</p>
+      <p class="empty-text">選んだタグを<strong>すべて</strong>含む記録だけを表示しています。<br>タグを減らすと見つかるかもしれません。</p>
+    </div>
     <div id="spot-list" class="spot-list"></div>
     <div id="list-empty" class="empty" hidden>
       <div class="empty-icon" aria-hidden="true">
@@ -245,8 +251,38 @@
     </div>
 
     <section class="form-section" aria-labelledby="dlight-h">
-      <h3 id="dlight-h" class="section-title">記録したときの光</h3>
+      <div class="section-head">
+        <h3 id="dlight-h" class="section-title">光を見る</h3>
+        <span id="sim-badge" class="sim-badge">記録したとき</span>
+      </div>
+      <div class="card sim-card">
+        <div class="sim-row">
+          <label class="field sim-date">
+            <span>日付</span>
+            <input id="sim-date" type="date">
+          </label>
+          <div class="sim-time">
+            <span class="sim-time-label">時刻</span>
+            <output id="sim-time-out" for="sim-time" class="sim-time-out num"></output>
+          </div>
+        </div>
+        <label class="visually-hidden" for="sim-time">時刻を選ぶ</label>
+        <input id="sim-time" class="slider" type="range" min="0" max="1435" step="5">
+        <div id="sim-quick" class="quick-row"></div>
+      </div>
       <div id="detail-light"></div>
+      <div class="card chart-card">
+        <span class="viz-label">1日の太陽の動き</span>
+        <div id="day-chart"></div>
+        <p class="help">グラフをタップすると、その時刻の光を表示します。オレンジの帯がゴールデンアワー（高さ0〜6°）です。</p>
+        <details class="hourly">
+          <summary>1時間ごとの表</summary>
+          <table>
+            <thead><tr><th scope="col">時刻</th><th scope="col">高さ</th><th scope="col">方位</th></tr></thead>
+            <tbody id="hourly-body"></tbody>
+          </table>
+        </details>
+      </div>
     </section>
 
     <div class="card info-card">

@@ -1,6 +1,6 @@
 // 光の情報パネル（記録画面・詳細画面で共通）
 import {
-  sunPosition, dayTimes, dirName, altitudeWord, lightType,
+  sunPosition, dayTimes, dirName, altitudeWord, lightType, riseSetAzimuth,
   compassSVG, altitudeSVG, timelineEl,
 } from './light.js';
 import { formatTime } from './time.js';
@@ -24,7 +24,7 @@ export function renderLightPanel(container, { date, lat, lng, heading = null }) 
   const grid = el('div', 'bento');
 
   const c1 = el('div', 'card viz-card');
-  c1.append(el('span', 'viz-label', '太陽の方位'), compassSVG(pos.azimuth, pos.altitude, heading),
+  c1.append(el('span', 'viz-label', '太陽の方位'), compassSVG(pos.azimuth, pos.altitude, heading, riseSetAzimuth(times, lat, lng)),
     el('span', 'viz-value num', `${Math.round(pos.azimuth)}° ${dirName(pos.azimuth)}`));
 
   const c2 = el('div', 'card viz-card');

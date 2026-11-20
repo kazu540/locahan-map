@@ -8,10 +8,11 @@ import { processPhoto } from './photos.js';
 import { renderLightPanel } from './lightpanel.js';
 import {
   lightSnapshot, sunPosition, dayTimes, dirName, altitudeWord, compassSVG, altitudeSVG, timelineEl,
+  dayChartSVG, hourlyTable,
 } from './light.js';
 import * as mapView from './map.js';
 
-const APP_VERSION = '0.5.0（段階5：地図とピン）';
+const APP_VERSION = '0.6.0（段階6：絞り込みと光のシミュレーション）';
 const DEFAULT_TAGS = ['歩道橋', '坂', '人が少ない', '階段', '路地', '川沿い', '夜景向き'];
 
 const $ = (id) => document.getElementById(id);
@@ -451,7 +452,9 @@ $('time-input').addEventListener('change', () => {
 });
 
 /* ---------- 一覧と地図のピン ---------- */
-let spotsCache = [];
+let spotsCache = [];          // すべての記録
+const filterTags = new Set(); // 絞り込みに使うタグ（すべて含むものだけ表示）
+
 async function renderList({ fit = false } = {}) {
   let spots = [];
   try { spots = await getAllSpots(); } catch (e) { toast('データを読み込めませんでした'); }
@@ -467,12 +470,55 @@ async function renderList({ fit = false } = {}) {
     }
   }));
   spotsCache = spots;
+  $('settings-count').textContent = `${spots.length}件`;
+  // 使われなくなったタグは絞り込みから外す
+  const used = new Set(spots.flatMap((s) => s.tags || []));
+  for (const t of [...filterTags]) if (!used.has(t)) filterTags.delete(t);
+  applyFilter({ fit });
+}
+
+function filteredSpots() {
+  if (!filterTags.size) return spotsCache;
+  return spotsCache.filter((s) => [...filterTags].every((t) => (s.tags || []).includes(t)));
+}
+
+function renderFilters() {
+  const used = new Set(spotsCache.flatMap((s) => s.tags || []));
+  const tags = allTags.filter((t) => used.has(t) || filterTags.has(t));
+  for (const t of used) if (!tags.includes(t)) tags.push(t);
+  for (const box of [$('map-filter'), $('list-filter')]) {
+    box.textContent = '';
+    box.hidden = tags.length === 0;
+    const all = el('button', 'fchip', 'すべて');
+    all.type = 'button';
+    all.setAttribute('aria-pressed', filterTags.size ? 'false' : 'true');
+    all.addEventListener('click', () => { filterTags.clear(); applyFilter(); });
+    box.append(all);
+    for (const t of tags) {
+      const b = el('button', 'fchip', t);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', filterTags.has(t) ? 'true' : 'false');
+      b.addEventListener('click', () => {
+        if (filterTags.has(t)) filterTags.delete(t); else filterTags.add(t);
+        applyFilter();
+      });
+      box.append(b);
+    }
+  }
+}
+
+function applyFilter({ fit = false } = {}) {
+  const spots = filteredSpots();
+  const total = spotsCache.length;
+  renderFilters();
 
   const list = $('spot-list');
   list.textContent = '';
-  $('list-empty').hidden = spots.length > 0;
-  $('list-count').textContent = spots.length ? `${spots.length}件の記録` : '';
-  $('settings-count').textContent = `${spots.length}件`;
+  $('list-empty').hidden = total > 0;
+  $('filter-empty').hidden = !(total > 0 && spots.length === 0);
+  $('list-count').textContent = !total ? ''
+    : filterTags.size ? `全${total}件のうち ${spots.length}件（${[...filterTags].join('＋')}）`
+      : `${total}件の記録`;
 
   for (const s of spots) {
     const card = el('button', 'spot-card');
@@ -498,6 +544,8 @@ async function renderList({ fit = false } = {}) {
   }
 
   mapView.setSpots(spots, { fit });
+  if (filterTags.size && currentView === 'map' && spots.length) mapView.fitAll();
+  if (filterTags.size && !spots.length && currentView === 'map') toast('条件に合う記録がありません');
 }
 
 /* ---------- 地図の下のパネル ---------- */
@@ -662,7 +710,7 @@ async function openDetail(id) {
   $('detail-route').textContent = s.route || '';
   $('detail-route-card').hidden = !s.route;
 
-  renderLightPanel($('detail-light'), { date: new Date(s.createdAt), lat: s.lat, lng: s.lng, heading: s.heading ?? null });
+  startSim(s);
 
   $('detail-coords').textContent = `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`;
   $('detail-acc').textContent = s.locationSource === 'manual'
@@ -673,6 +721,83 @@ async function openDetail(id) {
   $('delete-confirm').hidden = true;
   openSheet($('detail-sheet'));
 }
+/* ---------- 光のシミュレーション（日時を変えて再計算） ---------- */
+let simSpot = null;
+let simDate = null;
+const JST = 9 * 3600000;
+function jstMinutes(d) { const j = new Date(d.getTime() + JST); return j.getUTCHours() * 60 + j.getUTCMinutes(); }
+function jstDateStr(d) { return toInputValue(d).slice(0, 10); }
+function makeJst(dateStr, minutes) {
+  const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const mm = String(minutes % 60).padStart(2, '0');
+  const d = new Date(`${dateStr}T${hh}:${mm}:00+09:00`);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function startSim(s) {
+  simSpot = s;
+  setSim(new Date(s.createdAt));
+}
+
+function setSim(date) {
+  if (!simSpot || !date) return;
+  simDate = date;
+  const { lat, lng } = simSpot;
+  const isRecorded = Math.abs(date.getTime() - new Date(simSpot.createdAt).getTime()) < 60000;
+  $('sim-badge').textContent = isRecorded ? '記録したとき' : 'シミュレーション中';
+  $('sim-badge').classList.toggle('active', !isRecorded);
+  $('sim-date').value = jstDateStr(date);
+  $('sim-time').value = String(Math.round(jstMinutes(date) / 5) * 5);
+  $('sim-time-out').textContent = formatTime(date);
+
+  renderLightPanel($('detail-light'), { date, lat, lng, heading: simSpot.heading ?? null });
+
+  const times = dayTimes(date, lat, lng);
+  const chart = $('day-chart');
+  chart.textContent = '';
+  chart.append(dayChartSVG(times, lat, lng, date, formatTime, (d) => setSim(roundTo5(d))));
+
+  const body = $('hourly-body');
+  body.textContent = '';
+  for (const r of hourlyTable(times, lat, lng)) {
+    const tr = el('tr');
+    tr.append(el('td', 'num', formatTime(r.date)),
+      el('td', 'num', `${Math.round(r.altitude)}°`),
+      el('td', 'num', `${Math.round(r.azimuth)}° ${dirName(r.azimuth)}`));
+    body.append(tr);
+  }
+
+  const quick = $('sim-quick');
+  quick.textContent = '';
+  const items = [
+    ['記録時', new Date(simSpot.createdAt)],
+    ['日の出', times.sunrise],
+    ['朝ゴールデン', times.sunrise && times.goldenMorningEnd ? new Date((times.sunrise.getTime() + times.goldenMorningEnd.getTime()) / 2) : null],
+    ['正午', times.solarNoon],
+    ['夕ゴールデン', times.goldenEveningStart && times.sunset ? new Date((times.goldenEveningStart.getTime() + times.sunset.getTime()) / 2) : null],
+    ['日没', times.sunset],
+  ];
+  for (const [label, d] of items) {
+    if (!d) continue;
+    const b = el('button', 'qchip', label);
+    b.type = 'button';
+    b.setAttribute('aria-label', `${label}（${formatTime(d)}）にする`);
+    b.addEventListener('click', () => setSim(label === '記録時' ? d : roundTo5(d)));
+    quick.append(b);
+  }
+}
+function roundTo5(d) { return new Date(Math.round(d.getTime() / 300000) * 300000); }
+
+$('sim-time').addEventListener('input', () => {
+  const d = makeJst($('sim-date').value || jstDateStr(simDate), Number($('sim-time').value));
+  if (d) setSim(d);
+});
+$('sim-date').addEventListener('change', () => {
+  if (!$('sim-date').value) return;
+  const d = makeJst($('sim-date').value, jstMinutes(simDate));
+  if (d) setSim(d);
+});
+
 $('detail-photos').addEventListener('scroll', () => {
   const car = $('detail-photos');
   const n = car.querySelectorAll('img').length;
