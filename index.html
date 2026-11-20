@@ -91,17 +91,55 @@
     <header class="large-header">
       <h1 id="settings-title">設定</h1>
     </header>
-    <div class="group">
-      <div class="row">
-        <span>記録の件数</span>
-        <span id="settings-count" class="subtle num">0件</span>
-      </div>
-      <div class="row">
-        <span>アプリの版</span>
-        <span id="app-version" class="subtle num"></span>
+    <h2 class="group-title">ホーム画面に追加</h2>
+    <div id="home-ok" class="group pad" hidden>
+      <div class="info-row">
+        <div class="badge-icon ok" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></div>
+        <div class="info-text"><span class="info-title">ホーム画面から使っています</span><span class="info-sub">データが消えにくく、電波がなくても開けます。</span></div>
       </div>
     </div>
-    <p class="note">バックアップ（書き出し・読み込み）とタグの管理は、このあとの段階で追加します。</p>
+    <div id="home-steps" class="group pad">
+      <p class="lead">ホーム画面に追加すると、アプリのように全画面で使えて、<strong>保存したデータも消えにくく</strong>なります。</p>
+      <ol class="steps">
+        <li><span class="step-n">1</span><span>Safariの画面下（または上）にある <span class="inline-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5v10h14V11h-1"/></svg></span> <strong>共有ボタン</strong>を押す</span></li>
+        <li><span class="step-n">2</span><span>メニューを下にスクロールして <strong>「ホーム画面に追加」</strong> を押す</span></li>
+        <li><span class="step-n">3</span><span>右上の <strong>「追加」</strong> を押す</span></li>
+        <li><span class="step-n">4</span><span>ホーム画面にできた <strong>「ロケハン」</strong> のアイコンから開く</span></li>
+      </ol>
+      <p class="note warn">⚠ Safariで開いたときと、ホーム画面から開いたときでは、保存場所が別になります。いまSafariで記録したデータがある場合は、先に下の「バックアップを書き出す」を行い、ホーム画面のアプリで「読み込む」と引き継げます。</p>
+    </div>
+
+    <h2 class="group-title">バックアップ</h2>
+    <div class="group pad backup">
+      <div id="backup-alert" class="alert" hidden></div>
+      <p class="lead">記録と写真を<strong>1つのファイル</strong>にまとめて保存します。iPhoneの「ファイル」アプリやiCloud Driveに保存しておくと、データが消えたときや機種変更のときに元に戻せます。</p>
+      <p id="backup-last" class="subtle small num"></p>
+      <button id="backup-export" class="big-btn primary" type="button">バックアップを書き出す</button>
+      <label for="backup-file" class="big-btn secondary file-btn">バックアップから読み込む</label>
+      <input id="backup-file" class="visually-hidden" type="file" accept=".zip,application/zip">
+      <p class="note">読み込みでは、今ある記録は消えません。同じ記録は新しい内容で置き換え、ない記録は追加します。</p>
+      <div id="backup-progress" class="progress" hidden><span></span></div>
+    </div>
+
+    <h2 class="group-title">タグ</h2>
+    <div class="group">
+      <div id="tag-manage"></div>
+      <div class="row tag-new-row">
+        <label class="visually-hidden" for="tm-new">新しいタグ</label>
+        <input id="tm-new" class="text-input flat" type="text" maxlength="20" placeholder="新しいタグ" autocomplete="off" enterkeyhint="done">
+        <button id="tm-add" class="pill-btn accent" type="button">追加</button>
+      </div>
+    </div>
+    <p class="note">タグの名前を変えると、そのタグが付いた記録もすべて新しい名前になります。</p>
+
+    <h2 class="group-title">情報</h2>
+    <div class="group">
+      <div class="row"><span>記録の件数</span><span id="settings-count" class="subtle num">0件</span></div>
+      <div class="row"><span>使っている容量</span><span id="storage-used" class="subtle num">—</span></div>
+      <div class="row"><span>データの保護</span><span id="storage-persist" class="subtle">—</span></div>
+      <div class="row"><span>アプリの版</span><span id="app-version" class="subtle num"></span></div>
+    </div>
+    <p class="note">データはこのiPhoneの中だけに保存されます。天気を取得するときだけ、記録した場所の緯度・経度と日付を Open-Meteo（天気サービス）に送ります。地図は OpenStreetMap を使っています。</p>
   </section>
 
 </main>
@@ -119,6 +157,7 @@
   <button class="tab" data-view="settings" type="button">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
     <span>設定</span>
+    <span id="settings-dot" class="tab-dot" hidden></span>
   </button>
 </nav>
 
@@ -373,6 +412,23 @@
         </div>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- はじめての案内（Safariで開いたとき） -->
+<section id="install-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="install-title" hidden>
+  <div class="grabber" aria-hidden="true"></div>
+  <div class="sheet-body install-body">
+    <img src="icons/icon-192.png" alt="" class="install-icon" width="76" height="76">
+    <h2 id="install-title" class="install-title">ホーム画面に追加して使いましょう</h2>
+    <p class="lead center">アプリのように全画面で使えて、記録したデータも消えにくくなります。</p>
+    <ol class="steps">
+      <li><span class="step-n">1</span><span><span class="inline-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5v10h14V11h-1"/></svg></span> <strong>共有ボタン</strong>を押す</span></li>
+      <li><span class="step-n">2</span><span><strong>「ホーム画面に追加」</strong>を押す</span></li>
+      <li><span class="step-n">3</span><span><strong>「追加」</strong>を押して、ホーム画面のアイコンから開く</span></li>
+    </ol>
+    <button id="install-close" class="big-btn primary" type="button">わかりました</button>
+    <p class="note center">この手順は「設定」タブでいつでも見られます。</p>
   </div>
 </section>
 

@@ -12,9 +12,10 @@ import {
 } from './light.js';
 import * as mapView from './map.js';
 import { startCompass, stopCompass } from './compass.js';
+import { exportBackup, importBackup } from './backup.js';
 import { fetchWeather, manualWeather, weatherText, weatherIcon, MANUAL_KINDS, KINDS } from './weather.js';
 
-const APP_VERSION = '0.7.0（段階7：向きと順光・逆光）';
+const APP_VERSION = '1.0.0';
 const DEFAULT_TAGS = ['歩道橋', '坂', '人が少ない', '階段', '路地', '川沿い', '夜景向き'];
 
 const $ = (id) => document.getElementById(id);
@@ -67,6 +68,7 @@ function showView(name) {
   window.scrollTo(0, 0);
   currentView = name;
   if (name === 'map') requestAnimationFrame(() => mapView.refreshSize());
+  if (name === 'settings') renderSettings();
 }
 let currentView = 'map';
 document.querySelectorAll('.tab').forEach((t) => {
@@ -695,6 +697,7 @@ async function renderList({ fit = false } = {}) {
   }));
   spotsCache = spots;
   $('settings-count').textContent = `${spots.length}件`;
+  updateBackupInfo();
   // 使われなくなったタグは絞り込みから外す
   const used = new Set(spots.flatMap((s) => s.tags || []));
   for (const t of [...filterTags]) if (!used.has(t)) filterTags.delete(t);
@@ -1070,6 +1073,242 @@ $('delete-yes').addEventListener('click', async () => {
 
 /* ---------- 起動 ---------- */
 $('app-version').textContent = APP_VERSION;
+/* ---------- 設定：ホーム画面・バックアップ・タグ・情報 ---------- */
+const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+
+function ls(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    localStorage.setItem(key, value);
+  } catch (e) { return null; }
+  return null;
+}
+
+async function updateBackupInfo() {
+  let last = null;
+  try { last = await getMeta('lastBackupAt', null); } catch (e) { /* なし */ }
+  const total = spotsCache.length;
+  $('backup-last').textContent = last ? `最後の書き出し：${formatFull(new Date(last))}` : 'まだ書き出していません';
+  const days = last ? Math.floor((Date.now() - new Date(last).getTime()) / 86400000) : null;
+  const need = total > 0 && (days === null || days >= 14);
+  const alert = $('backup-alert');
+  alert.hidden = !need;
+  alert.textContent = days === null
+    ? `${total}件の記録があります。まだ一度もバックアップしていません。`
+    : `前回のバックアップから${days}日たっています。`;
+  $('settings-dot').hidden = !need;
+}
+
+async function renderSettings() {
+  $('home-ok').hidden = !isStandalone;
+  $('home-steps').hidden = isStandalone;
+  updateBackupInfo();
+  renderTagManager();
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const est = await navigator.storage.estimate();
+      const mb = (est.usage || 0) / 1048576;
+      $('storage-used').textContent = mb < 1 ? '1MB未満' : `約${mb < 10 ? mb.toFixed(1) : Math.round(mb)}MB`;
+    }
+    if (navigator.storage && navigator.storage.persisted) {
+      const p = await navigator.storage.persisted();
+      $('storage-persist').textContent = p ? '保護されています' : (isStandalone ? '通常' : '通常（ホーム画面に追加がおすすめ）');
+    }
+  } catch (e) { /* 表示しないだけ */ }
+}
+
+/* バックアップの書き出し：①ファイルを作る → ②保存する（iPhoneはボタンを押した直後しか共有画面を出せないため2段階） */
+let pendingBackup = null;
+function setProgress(on) { $('backup-progress').hidden = !on; }
+$('backup-export').addEventListener('click', async () => {
+  const btn = $('backup-export');
+  if (pendingBackup) { saveBackupFile(); return; }
+  btn.disabled = true;
+  btn.textContent = 'ファイルを作っています…';
+  setProgress(true);
+  try {
+    const r = await exportBackup(DEFAULT_TAGS);
+    pendingBackup = r;
+    const mb = r.blob.size / 1048576;
+    btn.textContent = `ファイルに保存する（${mb < 1 ? '1MB未満' : `${mb.toFixed(1)}MB`}）`;
+    toast(`記録${r.spots}件・写真${r.photos}枚をまとめました`);
+  } catch (e) {
+    btn.textContent = 'バックアップを書き出す';
+    toast('書き出しに失敗しました。もう一度お試しください');
+  } finally {
+    btn.disabled = false;
+    setProgress(false);
+  }
+});
+
+async function saveBackupFile() {
+  const r = pendingBackup;
+  const file = new File([r.blob], r.filename, { type: 'application/zip' });
+  let done = false;
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'ロケハン地図のバックアップ' });
+      done = true;
+    } else {
+      const url = URL.createObjectURL(r.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = r.filename;
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      done = true;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') toast('保存をやめました');
+    else toast('保存できませんでした。もう一度お試しください');
+  }
+  if (done) {
+    try { await setMeta('lastBackupAt', new Date().toISOString()); } catch (e) { /* 記録できなくても続ける */ }
+    pendingBackup = null;
+    $('backup-export').textContent = 'バックアップを書き出す';
+    toast('バックアップを保存しました');
+    updateBackupInfo();
+  }
+}
+
+$('backup-file').addEventListener('change', async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  setProgress(true);
+  try {
+    const r = await importBackup(f);
+    await loadTags();
+    await renderList({ fit: true });
+    renderSettings();
+    toast(`読み込みました（追加${r.added}件・更新${r.updated}件・写真${r.photos}枚）`);
+  } catch (err) {
+    toast(err && err.message ? err.message : '読み込めませんでした');
+  } finally {
+    setProgress(false);
+  }
+});
+
+/* タグの管理 */
+let tagEditing = null;  // 名前を変えているタグ
+let tagDeleting = null; // 削除の確認中のタグ
+function renderTagManager() {
+  const box = $('tag-manage');
+  box.textContent = '';
+  const counts = new Map();
+  for (const sp of spotsCache) for (const t of sp.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+  for (const t of allTags) {
+    const row = el('div', 'row tag-row');
+    if (tagEditing === t) {
+      const input = el('input', 'text-input flat');
+      input.type = 'text';
+      input.value = t;
+      input.maxLength = 20;
+      input.setAttribute('aria-label', `「${t}」の新しい名前`);
+      const ok = el('button', 'pill-btn accent', '決定');
+      ok.type = 'button';
+      const cancel = el('button', 'pill-btn', 'やめる');
+      cancel.type = 'button';
+      ok.addEventListener('click', () => renameTag(t, input.value));
+      input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.isComposing) renameTag(t, input.value); });
+      cancel.addEventListener('click', () => { tagEditing = null; renderTagManager(); });
+      row.append(input, ok, cancel);
+      setTimeout(() => input.focus(), 50);
+    } else if (tagDeleting === t) {
+      const n = counts.get(t) || 0;
+      row.append(el('span', 'tag-row-name', n ? `「${t}」を削除して、${n}件の記録から外しますか？` : `「${t}」を削除しますか？`));
+      const yes = el('button', 'pill-btn danger-fill', '削除');
+      yes.type = 'button';
+      const no = el('button', 'pill-btn', 'やめる');
+      no.type = 'button';
+      yes.addEventListener('click', () => deleteTag(t));
+      no.addEventListener('click', () => { tagDeleting = null; renderTagManager(); });
+      row.append(yes, no);
+    } else {
+      const name = el('span', 'tag-row-name', t);
+      const cnt = el('span', 'subtle small num', `${counts.get(t) || 0}件`);
+      const ed = el('button', 'text-btn', '名前を変更');
+      ed.type = 'button';
+      ed.setAttribute('aria-label', `「${t}」の名前を変更`);
+      const del = el('button', 'text-btn danger-text', '削除');
+      del.type = 'button';
+      del.setAttribute('aria-label', `「${t}」を削除`);
+      ed.addEventListener('click', () => { tagEditing = t; tagDeleting = null; renderTagManager(); });
+      del.addEventListener('click', () => { tagDeleting = t; tagEditing = null; renderTagManager(); });
+      row.append(name, cnt, ed, del);
+    }
+    box.append(row);
+  }
+}
+
+async function updateSpotsTags(fn) {
+  const spots = await getAllSpots();
+  for (const sp of spots) {
+    const before = JSON.stringify(sp.tags || []);
+    const after = fn(sp.tags || []);
+    if (JSON.stringify(after) !== before) {
+      sp.tags = after;
+      await putSpot(sp);
+    }
+  }
+}
+
+async function renameTag(oldName, raw) {
+  const name = String(raw).trim().replace(/\s+/g, ' ');
+  tagEditing = null;
+  if (!name || name === oldName) { renderTagManager(); return; }
+  try {
+    const merged = allTags.includes(name);
+    allTags = merged ? allTags.filter((x) => x !== oldName) : allTags.map((x) => (x === oldName ? name : x));
+    await setMeta('tags', allTags);
+    await updateSpotsTags((tags) => [...new Set(tags.map((x) => (x === oldName ? name : x)))]);
+    if (filterTags.delete(oldName)) filterTags.add(name);
+    await renderList();
+    renderTagManager();
+    toast(merged ? `「${oldName}」を「${name}」にまとめました` : `「${name}」に変更しました`);
+  } catch (e) {
+    toast('変更できませんでした');
+  }
+}
+
+async function deleteTag(name) {
+  tagDeleting = null;
+  try {
+    allTags = allTags.filter((x) => x !== name);
+    await setMeta('tags', allTags);
+    await updateSpotsTags((tags) => tags.filter((x) => x !== name));
+    filterTags.delete(name);
+    await renderList();
+    renderTagManager();
+    toast(`「${name}」を削除しました`);
+  } catch (e) {
+    toast('削除できませんでした');
+  }
+}
+
+async function addTagFromSettings() {
+  const name = $('tm-new').value.trim().replace(/\s+/g, ' ');
+  if (!name) return;
+  if (!allTags.includes(name)) {
+    allTags = [...allTags, name];
+    try { await setMeta('tags', allTags); } catch (e) { toast('追加できませんでした'); return; }
+  }
+  $('tm-new').value = '';
+  renderTagManager();
+  toast(`「${name}」を追加しました`);
+}
+$('tm-add').addEventListener('click', addTagFromSettings);
+$('tm-new').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) addTagFromSettings(); });
+
+/* はじめての案内（Safariで開いたときに1回だけ） */
+$('install-close').addEventListener('click', closeSheet);
+if (!isStandalone && !ls('locahan-install-hint')) {
+  ls('locahan-install-hint', '1');
+  setTimeout(() => { if (!openSheetEl) openSheet($('install-sheet')); }, 1200);
+}
+
 /* 天気がまだの記録を、電波があるときに取得する */
 let filling = false;
 async function fillPendingWeather() {

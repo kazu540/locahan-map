@@ -1,6 +1,6 @@
 // オフラインでも開けるようにするしくみ（Service Worker）
 // 方針：通信できるときは最新版を取り、できないときは保存しておいた版を使う。
-const CACHE = 'locahan-v0.7.0';
+const CACHE = 'locahan-v1.0.0';
 const SHELL = [
   './',
   './index.html',
@@ -15,6 +15,8 @@ const SHELL = [
   './js/map.js',
   './js/weather.js',
   './js/compass.js',
+  './js/backup.js',
+  './js/zip.js',
   './vendor/leaflet/leaflet.js',
   './vendor/leaflet/leaflet.css',
   './manifest.webmanifest',
