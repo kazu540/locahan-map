@@ -15,7 +15,7 @@ import { startCompass, stopCompass } from './compass.js';
 import { exportBackup, importBackup } from './backup.js';
 import { fetchWeather, manualWeather, weatherText, weatherIcon, MANUAL_KINDS, KINDS } from './weather.js';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 const DEFAULT_TAGS = ['歩道橋', '坂', '人が少ない', '階段', '路地', '川沿い', '夜景向き'];
 
 const $ = (id) => document.getElementById(id);

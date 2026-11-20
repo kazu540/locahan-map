@@ -1,6 +1,6 @@
 // オフラインでも開けるようにするしくみ（Service Worker）
 // 方針：通信できるときは最新版を取り、できないときは保存しておいた版を使う。
-const CACHE = 'locahan-v1.0.0';
+const CACHE = 'locahan-v1.0.1';
 const SHELL = [
   './',
   './index.html',
@@ -23,6 +23,7 @@ const SHELL = [
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (e) => {
