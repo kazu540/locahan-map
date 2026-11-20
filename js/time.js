@@ -37,3 +37,9 @@ export function fromInputValue(value) {
   const d = new Date(`${value}:00+09:00`);
   return isNaN(d.getTime()) ? null : d;
 }
+
+const fmtHM = new Intl.DateTimeFormat('ja-JP', { timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: false });
+// 例：16:31
+export function formatTime(date) {
+  return date ? fmtHM.format(date) : '—';
+}

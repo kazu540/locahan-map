@@ -5,8 +5,10 @@ import {
 } from './db.js';
 import { formatFull, formatShort, toInputValue, fromInputValue } from './time.js';
 import { processPhoto } from './photos.js';
+import { renderLightPanel } from './lightpanel.js';
+import { lightSnapshot } from './light.js';
 
-const APP_VERSION = '0.3.0（段階3：写真・メモ・タグ）';
+const APP_VERSION = '0.4.0（段階4：光の自動計算）';
 const DEFAULT_TAGS = ['歩道橋', '坂', '人が少ない', '階段', '路地', '川沿い', '夜景向き'];
 
 const $ = (id) => document.getElementById(id);
@@ -142,6 +144,11 @@ function currentLocation() {
   return { lat: rec.lat, lng: rec.lng, accuracy: rec.accuracy, source: rec.source };
 }
 
+function updateRecLight() {
+  const loc = currentLocation();
+  renderLightPanel($('rec-light'), { date: rec.time, lat: loc.lat, lng: loc.lng, heading: rec.heading });
+}
+
 function updateSaveButton() {
   const loc = currentLocation();
   const ok = loc.lat !== null && loc.lng !== null && !rec.busy && rec.processing === 0;
@@ -159,6 +166,7 @@ function getLocation() {
   const myNo = ++geoRequestNo;
   rec.lat = rec.lng = rec.accuracy = null;
   showManual(false);
+  updateRecLight();
   setLocStatus('loading', '現在地を取得しています…', '数秒かかることがあります');
 
   if (!window.isSecureContext || !('geolocation' in navigator)) {
@@ -177,6 +185,7 @@ function getLocation() {
     setLocStatus('ok', '現在地を取得しました',
       `${rec.lat.toFixed(5)}, ${rec.lng.toFixed(5)} ・ 誤差 約${Math.round(rec.accuracy)}m`);
     updateSaveButton();
+    updateRecLight();
   }, (err) => {
     if (myNo !== geoRequestNo) return;
     let help;
@@ -189,6 +198,7 @@ function getLocation() {
     }
     setLocStatus('warn', '現在地を取得できませんでした', '', help);
     showManual(true);
+    updateRecLight();
   }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
 }
 
@@ -304,6 +314,7 @@ function resetForm() {
   rec.removedPhotoIds = [];
   rec.tags = new Set();
   rec.source = null;
+  rec.heading = null;
   $('manual-lat').value = '';
   $('manual-lng').value = '';
   $('f-title').value = '';
@@ -336,6 +347,7 @@ async function openEdit(id) {
   rec.editId = id;
   $('record-title').textContent = '記録を編集';
   rec.lat = s.lat; rec.lng = s.lng; rec.accuracy = s.accuracy; rec.source = s.locationSource;
+  rec.heading = s.heading ?? null;
   showManual(false);
   setLocStatus('ok', '記録した位置', `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`);
   $('loc-retry').hidden = true;
@@ -352,6 +364,7 @@ async function openEdit(id) {
   renderPhotoStrip();
   renderTagPicker();
   updateSaveButton();
+  updateRecLight();
   openSheet($('record-sheet'));
 }
 
@@ -380,7 +393,7 @@ async function saveRecord() {
 
     const tagsInOrder = allTags.filter((t) => rec.tags.has(t));
     const spot = {
-      ...(base || { heading: null }),
+      ...(base || {}),
       id: spotId,
       createdAt: rec.time.toISOString(),
       lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy, locationSource: loc.source,
@@ -388,6 +401,8 @@ async function saveRecord() {
       memo: $('f-memo').value.trim(),
       route: $('f-route').value.trim(),
       tags: tagsInOrder,
+      heading: rec.heading,
+      light: lightSnapshot(rec.time, loc.lat, loc.lng),
       photoIds: rec.photos.map((p) => p.id),
       updatedAt: now,
     };
@@ -412,8 +427,8 @@ $('record-cancel').addEventListener('click', () => { geoRequestNo++; closeSheet(
 $('record-save').addEventListener('click', saveRecord);
 $('record-save-bottom').addEventListener('click', saveRecord);
 $('loc-retry').addEventListener('click', getLocation);
-$('manual-lat').addEventListener('input', updateSaveButton);
-$('manual-lng').addEventListener('input', updateSaveButton);
+$('manual-lat').addEventListener('input', () => { updateSaveButton(); updateRecLight(); });
+$('manual-lng').addEventListener('input', () => { updateSaveButton(); updateRecLight(); });
 $('time-edit').addEventListener('click', () => {
   const f = $('time-field');
   f.hidden = !f.hidden;
@@ -424,6 +439,7 @@ $('time-input').addEventListener('change', () => {
   if (d) {
     rec.time = d;
     $('time-text').textContent = formatFull(d);
+    updateRecLight();
   }
 });
 
@@ -508,6 +524,8 @@ async function openDetail(id) {
   $('detail-memo-card').hidden = !s.memo;
   $('detail-route').textContent = s.route || '';
   $('detail-route-card').hidden = !s.route;
+
+  renderLightPanel($('detail-light'), { date: new Date(s.createdAt), lat: s.lat, lng: s.lng, heading: s.heading ?? null });
 
   $('detail-coords').textContent = `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`;
   $('detail-acc').textContent = s.locationSource === 'manual'

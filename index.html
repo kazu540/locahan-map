@@ -150,6 +150,14 @@
       <p id="photo-status" class="help" hidden></p>
     </section>
 
+    <section class="form-section" aria-labelledby="light-h">
+      <div class="section-head">
+        <h3 id="light-h" class="section-title">光の情報</h3>
+        <span class="subtle small">自動で計算</span>
+      </div>
+      <div id="rec-light"></div>
+    </section>
+
     <section class="form-section" aria-labelledby="tag-h">
       <h3 id="tag-h" class="section-title">タグ</h3>
       <div id="tag-picker" class="tag-wrap"></div>
@@ -206,6 +214,11 @@
       <p id="detail-route"></p>
     </div>
 
+    <section class="form-section" aria-labelledby="dlight-h">
+      <h3 id="dlight-h" class="section-title">記録したときの光</h3>
+      <div id="detail-light"></div>
+    </section>
+
     <div class="card info-card">
       <div class="info-row">
         <div class="badge-icon neutral" aria-hidden="true">
@@ -234,6 +247,7 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+<script src="vendor/suncalc.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

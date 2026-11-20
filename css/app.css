@@ -19,6 +19,7 @@
   --warn-soft: rgba(255, 149, 0, 0.16);
   --danger: #D70015;
   --backdrop: rgba(0, 0, 0, 0.28);
+  --day: rgba(255, 200, 120, 0.45);
   --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.05);
   --font: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
   --tabbar-h: 62px;
@@ -46,6 +47,7 @@
     --warn-soft: rgba(255, 159, 10, 0.18);
     --danger: #FF453A;
     --backdrop: rgba(0, 0, 0, 0.5);
+    --day: rgba(255, 214, 160, 0.22);
     --card-shadow: none;
     color-scheme: dark;
   }
@@ -310,6 +312,59 @@ button:disabled { opacity: 0.4; cursor: default; }
 .spot-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .spot-thumb { overflow: hidden; }
 .spot-title { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 光の情報 */
+.section-head { display: flex; align-items: baseline; justify-content: space-between; margin-right: 4px; }
+.small { font-size: 13px; }
+.bento { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.bento .wide { grid-column: 1 / -1; }
+.viz-card { display: flex; flex-direction: column; align-items: center; gap: 4px; border-radius: 26px; }
+.viz-label { align-self: flex-start; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.viz-value { font-size: 16px; font-weight: 700; text-align: center; }
+.viz-value.golden { color: var(--accent-text); }
+.viz { display: block; width: 100%; max-width: 120px; height: auto; overflow: visible; }
+.viz-track { stroke: var(--sep); stroke-width: 1.5; }
+.viz-tick { stroke: var(--sep); stroke-width: 1.5; }
+.viz-north { font-size: 10px; font-weight: 800; fill: var(--danger); }
+.viz-fov { fill: var(--text); opacity: 0.08; }
+.viz-heading { stroke: var(--text); stroke-width: 2.6; stroke-linecap: round; }
+.viz-center { fill: var(--text); }
+.viz-sun { fill: var(--accent); }
+.viz-sun.down { fill: var(--text-2); opacity: 0.6; }
+.viz-sun.ring { stroke: var(--surface); stroke-width: 2.5; }
+.viz-arc-track { stroke: var(--surface-2); stroke-width: 7; stroke-linecap: round; }
+.viz-arc-golden { stroke: var(--accent-soft); stroke-width: 7; stroke-linecap: round; }
+.viz-arc-value { stroke: var(--accent); stroke-width: 7; stroke-linecap: round; }
+.viz-big { font-size: 22px; font-weight: 800; fill: var(--text); font-variant-numeric: tabular-nums; }
+
+.tl-card { display: flex; flex-direction: column; gap: 10px; border-radius: 26px; padding: 16px; }
+.timeline { font-size: 14px; color: var(--text-2); }
+.tl-bar { position: relative; height: 16px; border-radius: 8px; background: var(--surface-2); overflow: hidden; }
+.tl-seg { position: absolute; top: 0; bottom: 0; }
+.tl-seg.day { background: var(--day); }
+.tl-seg.golden { background: var(--accent); }
+.tl-seg.blue { background: #3E6FD8; opacity: 0.75; }
+.tl-now { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 1.5px var(--surface); }
+.tl-times { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 8px; }
+.tl-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tl-cell.end { align-items: flex-end; }
+.tl-cell-label { font-size: 12px; color: var(--text-2); }
+.tl-cell.golden .tl-cell-label { color: var(--accent-text); font-weight: 700; }
+.tl-cell-value { font-size: 17px; font-weight: 700; white-space: nowrap; }
+.tl-note { margin: 0; font-size: 12px; color: var(--text-2); line-height: 1.6; }
+.tl-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--text-2); }
+.tl-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.lg { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.lg.golden { background: var(--accent); }
+.lg.day { background: var(--day); }
+.lg.blue { background: #3E6FD8; }
+.lg.now { width: 3px; background: var(--text); }
+
+.lt-card { display: flex; align-items: center; gap: 12px; border-radius: 26px; }
+.lt-badge { padding: 6px 12px; border-radius: 14px; background: var(--accent); color: #FFFFFF; font-size: 15px; font-weight: 800; white-space: nowrap; }
+.lt-text { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lt-title { font-size: 15px; font-weight: 700; }
+.lt-sub { font-size: 12px; color: var(--text-2); }
 
 /* お知らせ */
 .toast {

@@ -1,6 +1,6 @@
 // オフラインでも開けるようにするしくみ（Service Worker）
 // 方針：通信できるときは最新版を取り、できないときは保存しておいた版を使う。
-const CACHE = 'locahan-v0.3.0';
+const CACHE = 'locahan-v0.4.0';
 const SHELL = [
   './',
   './index.html',
@@ -9,6 +9,9 @@ const SHELL = [
   './js/db.js',
   './js/time.js',
   './js/photos.js',
+  './js/light.js',
+  './js/lightpanel.js',
+  './vendor/suncalc.js',
   './manifest.webmanifest',
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
