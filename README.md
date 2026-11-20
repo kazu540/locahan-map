@@ -5,9 +5,11 @@
 - データはすべてiPhoneの中に保存されます（サーバーやログインはありません）。
 - 費用はかかりません（GitHub Pagesで公開しています）。
 
-> いまは **段階4** です。場所・日時・写真・タグ・メモ・行き方と、太陽の位置（方位・高さ・日の出・日没・ゴールデンアワー）を記録できます。
+> いまは **段階5** です。記録（場所・日時・写真・タグ・メモ・行き方・太陽の位置）を、地図と一覧で見返せます。
 > 使い方・バックアップ・困ったときの対処は、完成時にこのファイルへ詳しく書きます。
 
 ## 使っているもの（ライセンス）
 
 - [SunCalc](https://github.com/mourner/suncalc)（太陽の位置の計算）— BSD 2-Clause License。`vendor/suncalc.js` に同梱しています。
+- [Leaflet](https://leafletjs.com/)（地図の表示）— BSD 2-Clause License。`vendor/leaflet/` に同梱しています。
+- 地図データ：© [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors（ODbL）

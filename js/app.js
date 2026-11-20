@@ -3,12 +3,15 @@ import {
   getAllSpots, getSpot, putSpot, deleteSpotWithPhotos, newId, requestPersist,
   putPhoto, getPhoto, deletePhoto, getMeta, setMeta,
 } from './db.js';
-import { formatFull, formatShort, toInputValue, fromInputValue } from './time.js';
+import { formatFull, formatShort, formatTime, toInputValue, fromInputValue } from './time.js';
 import { processPhoto } from './photos.js';
 import { renderLightPanel } from './lightpanel.js';
-import { lightSnapshot } from './light.js';
+import {
+  lightSnapshot, sunPosition, dayTimes, dirName, altitudeWord, compassSVG, altitudeSVG, timelineEl,
+} from './light.js';
+import * as mapView from './map.js';
 
-const APP_VERSION = '0.4.0（段階4：光の自動計算）';
+const APP_VERSION = '0.5.0（段階5：地図とピン）';
 const DEFAULT_TAGS = ['歩道橋', '坂', '人が少ない', '階段', '路地', '川沿い', '夜景向き'];
 
 const $ = (id) => document.getElementById(id);
@@ -39,6 +42,7 @@ function makeUrlBag() {
 const listUrls = makeUrlBag();
 const detailUrls = makeUrlBag();
 const recUrls = makeUrlBag();
+const panelUrls = makeUrlBag();
 
 /* ---------- お知らせ ---------- */
 let toastTimer;
@@ -58,7 +62,10 @@ function showView(name) {
     else t.removeAttribute('aria-current');
   });
   window.scrollTo(0, 0);
+  currentView = name;
+  if (name === 'map') requestAnimationFrame(() => mapView.refreshSize());
 }
+let currentView = 'map';
 document.querySelectorAll('.tab').forEach((t) => {
   t.addEventListener('click', () => showView(t.dataset.view));
 });
@@ -413,7 +420,7 @@ async function saveRecord() {
     toast(wasEdit ? '変更を保存しました' : '保存しました');
     await renderList();
     if (wasEdit) setTimeout(() => openDetail(spotId), 300);
-    else showView('list');
+    else if (currentView === 'map') mapView.select(spotId);
   } catch (e) {
     toast('保存できませんでした。iPhoneの空き容量を確認してください');
   } finally {
@@ -443,11 +450,24 @@ $('time-input').addEventListener('change', () => {
   }
 });
 
-/* ---------- 一覧 ---------- */
-async function renderList() {
+/* ---------- 一覧と地図のピン ---------- */
+let spotsCache = [];
+async function renderList({ fit = false } = {}) {
   let spots = [];
   try { spots = await getAllSpots(); } catch (e) { toast('データを読み込めませんでした'); }
   listUrls.clear();
+  // 一覧と地図で同じ小さい写真を使う
+  await Promise.all(spots.map(async (s) => {
+    s.thumbUrl = null;
+    if (s.photoIds && s.photoIds.length) {
+      try {
+        const ph = await getPhoto(s.photoIds[0]);
+        if (ph) s.thumbUrl = listUrls.add(ph.thumb || ph.blob);
+      } catch (e) { /* 写真が読めなくても続ける */ }
+    }
+  }));
+  spotsCache = spots;
+
   const list = $('spot-list');
   list.textContent = '';
   $('list-empty').hidden = spots.length > 0;
@@ -458,7 +478,14 @@ async function renderList() {
     const card = el('button', 'spot-card');
     card.type = 'button';
     const thumb = el('div', 'spot-thumb');
-    thumb.innerHTML = ICONS.pin;
+    if (s.thumbUrl) {
+      const img = el('img');
+      img.alt = '';
+      img.src = s.thumbUrl;
+      thumb.append(img);
+    } else {
+      thumb.innerHTML = ICONS.pin;
+    }
     const meta = el('div', 'spot-meta');
     const date = formatShort(new Date(s.createdAt));
     if (s.title) meta.append(el('span', 'spot-title', s.title));
@@ -468,19 +495,129 @@ async function renderList() {
     card.setAttribute('aria-label', `${s.title || formatFull(new Date(s.createdAt))} の記録を開く`);
     card.addEventListener('click', () => openDetail(s.id));
     list.append(card);
-
-    if (s.photoIds && s.photoIds.length) {
-      getPhoto(s.photoIds[0]).then((ph) => {
-        if (!ph) return;
-        const img = el('img');
-        img.alt = '';
-        img.src = listUrls.add(ph.thumb || ph.blob);
-        thumb.textContent = '';
-        thumb.append(img);
-      }).catch(() => {});
-    }
   }
+
+  mapView.setSpots(spots, { fit });
 }
+
+/* ---------- 地図の下のパネル ---------- */
+function todayStatus(now, t) {
+  const n = now.getTime();
+  const left = (d) => {
+    const m = Math.max(1, Math.round((d.getTime() - n) / 60000));
+    return m >= 60 ? `あと${Math.floor(m / 60)}時間${m % 60 ? `${m % 60}分` : ''}` : `あと${m}分`;
+  };
+  if (!t.sunrise || !t.sunset) return { title: 'この日は日の出・日没がありません', sub: '' };
+  if (n < t.sunrise.getTime()) return { title: '朝のゴールデンアワー', sub: `${formatTime(t.sunrise)}–${formatTime(t.goldenMorningEnd)}（${left(t.sunrise)}で始まります）` };
+  if (t.goldenMorningEnd && n < t.goldenMorningEnd.getTime()) return { title: '朝のゴールデンアワー中', sub: `${formatTime(t.goldenMorningEnd)}まで`, now: true };
+  if (t.goldenEveningStart && n < t.goldenEveningStart.getTime()) return { title: '夕方のゴールデンアワー', sub: `${formatTime(t.goldenEveningStart)}–${formatTime(t.sunset)}（${left(t.goldenEveningStart)}で始まります）` };
+  if (n < t.sunset.getTime()) return { title: '夕方のゴールデンアワー中', sub: `日没 ${formatTime(t.sunset)}（${left(t.sunset)}）`, now: true };
+  if (t.blueEveningEnd && n < t.blueEveningEnd.getTime()) return { title: 'ブルーアワーの時間です', sub: `${formatTime(t.blueEveningEnd)}ごろまで`, now: true };
+  return { title: '今日の日没は終わりました', sub: `日没は ${formatTime(t.sunset)} でした` };
+}
+
+const SUN_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="14" r="4"/><path d="M12 4v3M4.9 7.9l2 2M19.1 7.9l-2 2M2 18h20"/></svg>';
+
+function renderToday() {
+  const c = mapView.getCenter();
+  const now = new Date();
+  const t = dayTimes(now, c.lat, c.lng);
+  $('today-sub').textContent = `${formatShort(now).replace(/\s?\d+:\d+$/, '')}・地図の中心`;
+  const tl = $('today-timeline');
+  tl.textContent = '';
+  tl.append(timelineEl(t, now, formatTime));
+  $('today-times').innerHTML = '';
+  for (const [label, d] of [['日の出', t.sunrise], ['いま', now], ['日没', t.sunset]]) {
+    $('today-times').append(el('span', '', `${label} ${formatTime(d)}`));
+  }
+  const st = todayStatus(now, t);
+  const box = $('today-status');
+  box.textContent = '';
+  box.classList.toggle('active', !!st.now);
+  const icon = el('span', 'today-icon');
+  icon.innerHTML = SUN_ICON;
+  const txt = el('div', 'today-text');
+  txt.append(el('span', 'today-title', st.title), el('span', 'today-sub num', st.sub));
+  box.append(icon, txt);
+}
+
+let panelSpotId = null;
+function showSpotPanel(id) {
+  const s = spotsCache.find((x) => x.id === id);
+  if (!s) return;
+  panelSpotId = id;
+  panelUrls.clear();
+  const ph = $('ps-photo');
+  ph.textContent = '';
+  ph.classList.toggle('empty', !s.thumbUrl);
+  if (s.thumbUrl) {
+    const img = el('img');
+    img.alt = '';
+    img.src = s.thumbUrl;
+    ph.append(img);
+    // 大きい写真に差し替え
+    getPhoto(s.photoIds[0]).then((p) => {
+      if (p && panelSpotId === id) img.src = panelUrls.add(p.blob);
+    }).catch(() => {});
+  } else {
+    ph.innerHTML = ICONS.camera;
+  }
+  $('ps-name').textContent = s.title || formatShort(new Date(s.createdAt));
+  $('ps-time').textContent = `${formatFull(new Date(s.createdAt))} に記録`;
+  const tags = $('ps-tags');
+  tags.textContent = '';
+  for (const t of s.tags || []) tags.append(el('span', 'tag-label', t));
+  tags.hidden = !(s.tags && s.tags.length);
+
+  const date = new Date(s.createdAt);
+  const pos = sunPosition(date, s.lat, s.lng);
+  const box = $('ps-light');
+  box.textContent = '';
+  const a = el('div', 'ps-viz');
+  a.append(compassSVG(pos.azimuth, pos.altitude, s.heading ?? null),
+    el('span', 'ps-viz-text num', `${Math.round(pos.azimuth)}° ${dirName(pos.azimuth)}`));
+  const b = el('div', 'ps-viz');
+  b.append(altitudeSVG(pos.altitude), el('span', 'ps-viz-text', altitudeWord(pos.altitude)));
+  box.append(a, b);
+
+  $('panel-today').hidden = true;
+  $('panel-spot').hidden = false;
+  const panel = $('map-panel');
+  panel.classList.remove('pop');
+  void panel.offsetWidth;
+  panel.classList.add('pop');
+}
+function showTodayPanel() {
+  panelSpotId = null;
+  $('panel-spot').hidden = true;
+  $('panel-today').hidden = false;
+  renderToday();
+}
+
+let moveTimer;
+mapView.initMap({
+  onSelect: showSpotPanel,
+  onDeselect: showTodayPanel,
+  onMove: () => {
+    clearTimeout(moveTimer);
+    moveTimer = setTimeout(() => { if (!panelSpotId) renderToday(); }, 250);
+  },
+});
+$('ps-close').addEventListener('click', () => mapView.select(null));
+$('ps-open').addEventListener('click', () => { if (panelSpotId) openDetail(panelSpotId); });
+$('map-fit').addEventListener('click', () => {
+  if (!spotsCache.length) { toast('まだ記録がありません'); return; }
+  mapView.fitAll();
+});
+$('map-locate').addEventListener('click', () => {
+  if (!('geolocation' in navigator)) { toast('この端末では現在地を使えません'); return; }
+  navigator.geolocation.getCurrentPosition(
+    (p) => mapView.showMe(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
+    (err) => toast(err.code === 1 ? '位置情報が許可されていません（設定アプリで変更できます）' : '現在地を取得できませんでした'),
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
+  );
+});
+setInterval(() => { if (!panelSpotId && currentView === 'map') renderToday(); }, 60000);
 
 /* ---------- 詳細 ---------- */
 let currentDetailId = null;
@@ -567,7 +704,8 @@ $('delete-yes').addEventListener('click', async () => {
 
 /* ---------- 起動 ---------- */
 $('app-version').textContent = APP_VERSION;
-loadTags().then(renderList);
+renderToday();
+loadTags().then(() => renderList({ fit: true }));
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
