@@ -132,5 +132,4 @@ Claude（Claude Code）に、日本語でやってほしいことを伝えてく
 - [SunCalc](https://github.com/mourner/suncalc)（太陽の位置の計算）— BSD 2-Clause License。`vendor/suncalc.js` に同梱
 - [Leaflet](https://leafletjs.com/)（地図の表示）— BSD 2-Clause License。`vendor/leaflet/` に同梱
 - 地図データ：© [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors（ODbL）
-- 地図の絵柄：© [CARTO](https://carto.com/attributions)（Voyager）
 - 天気：[Open-Meteo](https://open-meteo.com/)（無料・登録不要。CC BY 4.0）。天気を取得するときだけ、記録した場所の緯度・経度と日付を Open-Meteo に送ります。写真やメモは送りません。

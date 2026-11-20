@@ -1,6 +1,6 @@
 // オフラインでも開けるようにするしくみ（Service Worker）
 // 方針：通信できるときは最新版を取り、できないときは保存しておいた版を使う。
-const CACHE = 'locahan-v1.0.3';
+const CACHE = 'locahan-v1.0.4';
 const SHELL = [
   './',
   './index.html',
