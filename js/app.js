@@ -1,8 +1,13 @@
 // ロケハン地図 — 画面の動き
-import { getAllSpots, getSpot, putSpot, deleteSpot, newId, requestPersist } from './db.js';
+import {
+  getAllSpots, getSpot, putSpot, deleteSpotWithPhotos, newId, requestPersist,
+  putPhoto, getPhoto, deletePhoto, getMeta, setMeta,
+} from './db.js';
 import { formatFull, formatShort, toInputValue, fromInputValue } from './time.js';
+import { processPhoto } from './photos.js';
 
-const APP_VERSION = '0.2.0（段階2：最小版）';
+const APP_VERSION = '0.3.0（段階3：写真・メモ・タグ）';
+const DEFAULT_TAGS = ['歩道橋', '坂', '人が少ない', '階段', '路地', '川沿い', '夜景向き'];
 
 const $ = (id) => document.getElementById(id);
 
@@ -10,16 +15,37 @@ const ICONS = {
   ok: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>',
   warn: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/></svg>',
   pin: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
+  camera: '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  x: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
 };
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+/* ---------- 画像のURL管理（使い終わったらメモリを返す） ---------- */
+function makeUrlBag() {
+  let urls = [];
+  return {
+    add(blob) { const u = URL.createObjectURL(blob); urls.push(u); return u; },
+    clear() { urls.forEach((u) => URL.revokeObjectURL(u)); urls = []; },
+  };
+}
+const listUrls = makeUrlBag();
+const detailUrls = makeUrlBag();
+const recUrls = makeUrlBag();
 
 /* ---------- お知らせ ---------- */
 let toastTimer;
 function toast(msg) {
-  const el = $('toast');
-  el.textContent = msg;
-  el.hidden = false;
+  const t = $('toast');
+  t.textContent = msg;
+  t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 2400);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2400);
 }
 
 /* ---------- 画面の切り替え ---------- */
@@ -37,36 +63,54 @@ document.querySelectorAll('.tab').forEach((t) => {
 
 /* ---------- シートの出し入れ ---------- */
 let openSheetEl = null;
-function openSheet(el) {
-  openSheetEl = el;
+function openSheet(sheet) {
+  if (openSheetEl && openSheetEl !== sheet) {
+    openSheetEl.classList.remove('open');
+    const prev = openSheetEl;
+    setTimeout(() => { if (openSheetEl !== prev) prev.hidden = true; }, 420);
+  }
+  openSheetEl = sheet;
   const bd = $('backdrop');
   bd.hidden = false;
-  el.hidden = false;
-  el.querySelector('.sheet-body').scrollTop = 0;
+  sheet.hidden = false;
+  sheet.querySelector('.sheet-body').scrollTop = 0;
   requestAnimationFrame(() => requestAnimationFrame(() => {
     bd.classList.add('open');
-    el.classList.add('open');
+    sheet.classList.add('open');
   }));
   document.body.style.overflow = 'hidden';
 }
 function closeSheet() {
-  const el = openSheetEl;
-  if (!el) return;
+  const sheet = openSheetEl;
+  if (!sheet) return;
   openSheetEl = null;
   const bd = $('backdrop');
-  el.classList.remove('open');
+  sheet.classList.remove('open');
   bd.classList.remove('open');
   document.body.style.overflow = '';
   setTimeout(() => {
-    if (openSheetEl !== el) { el.hidden = true; }
+    if (openSheetEl !== sheet) sheet.hidden = true;
     if (!openSheetEl) bd.hidden = true;
   }, 420);
 }
-$('backdrop').addEventListener('click', closeSheet);
+$('backdrop').addEventListener('click', () => { if (openSheetEl !== $('record-sheet')) closeSheet(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
 
-/* ---------- 記録 ---------- */
-const rec = { lat: null, lng: null, accuracy: null, source: null, time: new Date(), busy: false };
+/* ---------- タグ ---------- */
+let allTags = [...DEFAULT_TAGS];
+async function loadTags() {
+  try { allTags = await getMeta('tags', [...DEFAULT_TAGS]); } catch (e) { allTags = [...DEFAULT_TAGS]; }
+}
+
+/* ---------- 記録（新規・編集） ---------- */
+const rec = {
+  mode: 'new', editId: null,
+  lat: null, lng: null, accuracy: null, source: null, time: new Date(),
+  busy: false, processing: 0,
+  photos: [],          // { id, existing, url, blob?, thumb?, width?, height? }
+  removedPhotoIds: [],
+  tags: new Set(),
+};
 let geoRequestNo = 0;
 
 function setLocStatus(kind, title, sub, help) {
@@ -81,16 +125,29 @@ function setLocStatus(kind, title, sub, help) {
 }
 
 function parseCoord(v, min, max) {
-  const n = parseFloat(String(v).trim().replace(/[，、]/g, '.').replace(/[０-９．－]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)));
+  const s = String(v).trim()
+    .replace(/[０-９．－]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[，、]/g, '.');
+  if (s === '') return null;
+  const n = Number(s);
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
 
-function updateSaveButton() {
-  let ok = rec.lat !== null && rec.lng !== null;
+function currentLocation() {
   if (!$('manual-loc').hidden) {
-    ok = parseCoord($('manual-lat').value, -90, 90) !== null && parseCoord($('manual-lng').value, -180, 180) !== null;
+    const lat = parseCoord($('manual-lat').value, -90, 90);
+    const lng = parseCoord($('manual-lng').value, -180, 180);
+    return { lat, lng, accuracy: null, source: 'manual' };
   }
-  $('record-save').disabled = !ok || rec.busy;
+  return { lat: rec.lat, lng: rec.lng, accuracy: rec.accuracy, source: rec.source };
+}
+
+function updateSaveButton() {
+  const loc = currentLocation();
+  const ok = loc.lat !== null && loc.lng !== null && !rec.busy && rec.processing === 0;
+  $('record-save').disabled = !ok;
+  $('record-save-bottom').disabled = !ok;
+  $('record-save-bottom').textContent = rec.processing > 0 ? '写真を準備しています…' : '保存する';
 }
 
 function showManual(show) {
@@ -105,8 +162,8 @@ function getLocation() {
   setLocStatus('loading', '現在地を取得しています…', '数秒かかることがあります');
 
   if (!window.isSecureContext || !('geolocation' in navigator)) {
-    setLocStatus('warn', '現在地を使えません',
-      '', 'この接続では位置情報が使えません（https:// で始まるアドレスで開く必要があります）。下に緯度・経度を入力して記録できます。');
+    setLocStatus('warn', '現在地を使えません', '',
+      'この接続では位置情報が使えません（https:// で始まるアドレスで開く必要があります）。下に緯度・経度を入力して記録できます。');
     showManual(true);
     return;
   }
@@ -141,46 +198,209 @@ function setRecordTime(date) {
   $('time-input').value = toInputValue(date);
 }
 
-function openRecord() {
+/* 写真の並び */
+function renderPhotoStrip() {
+  const strip = $('photo-strip');
+  strip.querySelectorAll('.photo-tile').forEach((t) => t.remove());
+  const addTile = strip.querySelector('.photo-add');
+  rec.photos.forEach((p, i) => {
+    const tile = el('div', 'photo-tile');
+    if (!p.url) {
+      tile.classList.add('busy');
+    } else {
+      const img = el('img');
+      img.src = p.url;
+      img.alt = `写真 ${i + 1}`;
+      tile.append(img);
+      const rm = el('button', 'photo-remove');
+      rm.type = 'button';
+      rm.setAttribute('aria-label', `写真 ${i + 1} を外す`);
+      const dot = el('span');
+      dot.innerHTML = ICONS.x;
+      rm.append(dot);
+      rm.addEventListener('click', () => {
+        if (p.existing) rec.removedPhotoIds.push(p.id);
+        rec.photos = rec.photos.filter((x) => x !== p);
+        renderPhotoStrip();
+      });
+      tile.append(rm);
+    }
+    strip.insertBefore(tile, addTile);
+  });
+}
+
+$('photo-input').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length) return;
+  let failed = 0;
+  const slots = files.map(() => ({ id: newId(), existing: false, url: null }));
+  rec.photos.push(...slots);
+  rec.processing += files.length;
+  renderPhotoStrip();
+  updateSaveButton();
+  // 1枚ずつ順番に処理（iPhoneのメモリ不足を防ぐため）
+  for (let i = 0; i < files.length; i++) {
+    const slot = slots[i];
+    try {
+      const r = await processPhoto(files[i]);
+      Object.assign(slot, r, { url: recUrls.add(r.thumb) });
+    } catch (err) {
+      failed++;
+      rec.photos = rec.photos.filter((x) => x !== slot);
+    }
+    rec.processing--;
+    renderPhotoStrip();
+    updateSaveButton();
+  }
+  if (failed) toast(`${failed}枚の写真を読み込めませんでした`);
+});
+
+/* タグの選択 */
+function renderTagPicker() {
+  const wrap = $('tag-picker');
+  wrap.textContent = '';
+  for (const tag of allTags) {
+    const b = el('button', 'tag-chip', tag);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', rec.tags.has(tag) ? 'true' : 'false');
+    b.addEventListener('click', () => {
+      if (rec.tags.has(tag)) rec.tags.delete(tag); else rec.tags.add(tag);
+      b.setAttribute('aria-pressed', rec.tags.has(tag) ? 'true' : 'false');
+    });
+    wrap.append(b);
+  }
+  const add = el('button', 'tag-chip add', '＋ タグを追加');
+  add.type = 'button';
+  add.addEventListener('click', () => {
+    $('tag-add-row').hidden = false;
+    $('tag-new').value = '';
+    $('tag-new').focus();
+  });
+  wrap.append(add);
+}
+
+async function addNewTag() {
+  const name = $('tag-new').value.trim().replace(/\s+/g, ' ');
+  if (!name) { $('tag-add-row').hidden = true; return; }
+  if (!allTags.includes(name)) {
+    allTags = [...allTags, name];
+    try { await setMeta('tags', allTags); } catch (e) { toast('タグを保存できませんでした'); }
+  }
+  rec.tags.add(name);
+  $('tag-add-row').hidden = true;
+  renderTagPicker();
+}
+$('tag-new-ok').addEventListener('click', addNewTag);
+$('tag-new').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); addNewTag(); }
+});
+
+function resetForm() {
+  recUrls.clear();
   rec.busy = false;
+  rec.processing = 0;
+  rec.photos = [];
+  rec.removedPhotoIds = [];
+  rec.tags = new Set();
   rec.source = null;
   $('manual-lat').value = '';
   $('manual-lng').value = '';
+  $('f-title').value = '';
+  $('f-memo').value = '';
+  $('f-route').value = '';
   $('time-field').hidden = true;
   $('time-edit').textContent = '変更';
+  $('tag-add-row').hidden = true;
+  $('photo-status').hidden = true;
+}
+
+function openRecord() {
+  resetForm();
+  rec.mode = 'new';
+  rec.editId = null;
+  $('record-title').textContent = 'ここを記録';
   setRecordTime(new Date());
+  renderPhotoStrip();
+  renderTagPicker();
   openSheet($('record-sheet'));
   getLocation();
 }
 
-async function saveRecord() {
-  if (rec.busy) return;
-  let { lat, lng, accuracy, source } = rec;
-  if (!$('manual-loc').hidden) {
-    lat = parseCoord($('manual-lat').value, -90, 90);
-    lng = parseCoord($('manual-lng').value, -180, 180);
-    accuracy = null;
-    source = 'manual';
+async function openEdit(id) {
+  const s = await getSpot(id);
+  if (!s) return;
+  resetForm();
+  geoRequestNo++;
+  rec.mode = 'edit';
+  rec.editId = id;
+  $('record-title').textContent = '記録を編集';
+  rec.lat = s.lat; rec.lng = s.lng; rec.accuracy = s.accuracy; rec.source = s.locationSource;
+  showManual(false);
+  setLocStatus('ok', '記録した位置', `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`);
+  $('loc-retry').hidden = true;
+  setRecordTime(new Date(s.createdAt));
+  $('f-title').value = s.title || '';
+  $('f-memo').value = s.memo || '';
+  $('f-route').value = s.route || '';
+  rec.tags = new Set(s.tags || []);
+  for (const t of rec.tags) if (!allTags.includes(t)) allTags.push(t);
+  for (const pid of s.photoIds || []) {
+    const ph = await getPhoto(pid);
+    if (ph) rec.photos.push({ id: pid, existing: true, url: recUrls.add(ph.thumb || ph.blob) });
   }
-  if (lat === null || lng === null) return;
+  renderPhotoStrip();
+  renderTagPicker();
+  updateSaveButton();
+  openSheet($('record-sheet'));
+}
+
+async function saveRecord() {
+  if (rec.busy || rec.processing > 0) return;
+  const loc = currentLocation();
+  if (loc.lat === null || loc.lng === null) return;
   rec.busy = true;
   updateSaveButton();
-  const spot = {
-    id: newId(),
-    createdAt: rec.time.toISOString(),
-    lat, lng, accuracy, locationSource: source,
-    title: '', memo: '', route: '', tags: [], heading: null, photoIds: [],
-    updatedAt: new Date().toISOString(),
-  };
   try {
+    const now = new Date().toISOString();
+    const base = rec.mode === 'edit' ? await getSpot(rec.editId) : null;
+    const spotId = base ? base.id : newId();
+
+    // 新しい写真を保存
+    for (const p of rec.photos) {
+      if (p.existing) continue;
+      await putPhoto({
+        id: p.id, spotId, blob: p.blob, thumb: p.thumb,
+        width: p.width, height: p.height, createdAt: now,
+      });
+      p.existing = true;
+    }
+    // 外した写真を削除
+    for (const pid of rec.removedPhotoIds) await deletePhoto(pid);
+
+    const tagsInOrder = allTags.filter((t) => rec.tags.has(t));
+    const spot = {
+      ...(base || { heading: null }),
+      id: spotId,
+      createdAt: rec.time.toISOString(),
+      lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy, locationSource: loc.source,
+      title: $('f-title').value.trim(),
+      memo: $('f-memo').value.trim(),
+      route: $('f-route').value.trim(),
+      tags: tagsInOrder,
+      photoIds: rec.photos.map((p) => p.id),
+      updatedAt: now,
+    };
     await putSpot(spot);
     requestPersist();
+    const wasEdit = rec.mode === 'edit';
     closeSheet();
-    toast('保存しました');
-    showView('list');
+    toast(wasEdit ? '変更を保存しました' : '保存しました');
     await renderList();
+    if (wasEdit) setTimeout(() => openDetail(spotId), 300);
+    else showView('list');
   } catch (e) {
-    toast('保存できませんでした。もう一度お試しください');
+    toast('保存できませんでした。iPhoneの空き容量を確認してください');
   } finally {
     rec.busy = false;
     updateSaveButton();
@@ -190,6 +410,7 @@ async function saveRecord() {
 $('record-btn').addEventListener('click', openRecord);
 $('record-cancel').addEventListener('click', () => { geoRequestNo++; closeSheet(); });
 $('record-save').addEventListener('click', saveRecord);
+$('record-save-bottom').addEventListener('click', saveRecord);
 $('loc-retry').addEventListener('click', getLocation);
 $('manual-lat').addEventListener('input', updateSaveButton);
 $('manual-lng').addEventListener('input', updateSaveButton);
@@ -210,6 +431,7 @@ $('time-input').addEventListener('change', () => {
 async function renderList() {
   let spots = [];
   try { spots = await getAllSpots(); } catch (e) { toast('データを読み込めませんでした'); }
+  listUrls.clear();
   const list = $('spot-list');
   list.textContent = '';
   $('list-empty').hidden = spots.length > 0;
@@ -217,25 +439,30 @@ async function renderList() {
   $('settings-count').textContent = `${spots.length}件`;
 
   for (const s of spots) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'spot-card';
-    const thumb = document.createElement('div');
-    thumb.className = 'spot-thumb';
+    const card = el('button', 'spot-card');
+    card.type = 'button';
+    const thumb = el('div', 'spot-thumb');
     thumb.innerHTML = ICONS.pin;
-    const meta = document.createElement('div');
-    meta.className = 'spot-meta';
-    const date = document.createElement('span');
-    date.className = 'spot-date num';
-    date.textContent = formatShort(new Date(s.createdAt));
-    const sub = document.createElement('span');
-    sub.className = 'spot-sub num';
-    sub.textContent = `${s.lat.toFixed(4)}, ${s.lng.toFixed(4)}`;
-    meta.append(date, sub);
-    btn.append(thumb, meta);
-    btn.setAttribute('aria-label', `${formatFull(new Date(s.createdAt))}の記録を開く`);
-    btn.addEventListener('click', () => openDetail(s.id));
-    list.append(btn);
+    const meta = el('div', 'spot-meta');
+    const date = formatShort(new Date(s.createdAt));
+    if (s.title) meta.append(el('span', 'spot-title', s.title));
+    meta.append(el('span', s.title ? 'spot-sub num' : 'spot-date num', date));
+    if (s.tags && s.tags.length) meta.append(el('span', 'spot-sub', s.tags.join('・')));
+    card.append(thumb, meta);
+    card.setAttribute('aria-label', `${s.title || formatFull(new Date(s.createdAt))} の記録を開く`);
+    card.addEventListener('click', () => openDetail(s.id));
+    list.append(card);
+
+    if (s.photoIds && s.photoIds.length) {
+      getPhoto(s.photoIds[0]).then((ph) => {
+        if (!ph) return;
+        const img = el('img');
+        img.alt = '';
+        img.src = listUrls.add(ph.thumb || ph.blob);
+        thumb.textContent = '';
+        thumb.append(img);
+      }).catch(() => {});
+    }
   }
 }
 
@@ -245,17 +472,61 @@ async function openDetail(id) {
   const s = await getSpot(id);
   if (!s) return;
   currentDetailId = id;
-  $('detail-time').textContent = formatFull(new Date(s.createdAt));
+  detailUrls.clear();
+
+  const car = $('detail-photos');
+  car.textContent = '';
+  const ids = s.photoIds || [];
+  if (!ids.length) {
+    const none = el('div', 'no-photo');
+    none.innerHTML = ICONS.camera;
+    car.append(none);
+  }
+  for (const [i, pid] of ids.entries()) {
+    const ph = await getPhoto(pid);
+    if (!ph) continue;
+    const img = el('img');
+    img.alt = `写真 ${i + 1}`;
+    img.src = detailUrls.add(ph.blob);
+    car.append(img);
+  }
+  const count = $('detail-photo-count');
+  const n = car.querySelectorAll('img').length;
+  count.hidden = n < 2;
+  count.textContent = `1 / ${n}`;
+  car.scrollLeft = 0;
+
+  $('detail-name').textContent = s.title || formatShort(new Date(s.createdAt));
+  $('detail-time').textContent = `${formatFull(new Date(s.createdAt))} に記録`;
+
+  const tags = $('detail-tags');
+  tags.textContent = '';
+  for (const t of s.tags || []) tags.append(el('span', 'tag-label', t));
+  tags.hidden = !(s.tags && s.tags.length);
+
+  $('detail-memo').textContent = s.memo || '';
+  $('detail-memo-card').hidden = !s.memo;
+  $('detail-route').textContent = s.route || '';
+  $('detail-route-card').hidden = !s.route;
+
   $('detail-coords').textContent = `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`;
   $('detail-acc').textContent = s.locationSource === 'manual'
     ? '手入力した位置'
     : (s.accuracy ? `GPS・誤差 約${Math.round(s.accuracy)}m` : 'GPS');
-  $('detail-maps').href = `https://maps.apple.com/?ll=${s.lat},${s.lng}&q=${encodeURIComponent('ロケ地')}`;
+  $('detail-maps').href = `https://maps.apple.com/?ll=${s.lat},${s.lng}&q=${encodeURIComponent(s.title || 'ロケ地')}`;
   $('detail-delete').hidden = false;
   $('delete-confirm').hidden = true;
   openSheet($('detail-sheet'));
 }
+$('detail-photos').addEventListener('scroll', () => {
+  const car = $('detail-photos');
+  const n = car.querySelectorAll('img').length;
+  if (n < 2) return;
+  const i = Math.round(car.scrollLeft / (car.clientWidth + 10)) + 1;
+  $('detail-photo-count').textContent = `${Math.min(n, Math.max(1, i))} / ${n}`;
+}, { passive: true });
 $('detail-close').addEventListener('click', closeSheet);
+$('detail-edit').addEventListener('click', () => { if (currentDetailId) openEdit(currentDetailId); });
 $('detail-delete').addEventListener('click', () => {
   $('detail-delete').hidden = true;
   $('delete-confirm').hidden = false;
@@ -267,7 +538,7 @@ $('delete-no').addEventListener('click', () => {
 $('delete-yes').addEventListener('click', async () => {
   if (!currentDetailId) return;
   try {
-    await deleteSpot(currentDetailId);
+    await deleteSpotWithPhotos(currentDetailId);
     closeSheet();
     toast('削除しました');
     await renderList();
@@ -278,7 +549,7 @@ $('delete-yes').addEventListener('click', async () => {
 
 /* ---------- 起動 ---------- */
 $('app-version').textContent = APP_VERSION;
-renderList();
+loadTags().then(renderList);
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

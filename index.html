@@ -137,27 +137,76 @@
         <input id="time-input" type="datetime-local">
       </label>
     </div>
-    <p class="note">写真・タグ・メモ・光の情報は、このあとの段階で追加します。</p>
+
+    <section class="form-section" aria-labelledby="photo-h">
+      <h3 id="photo-h" class="section-title">写真</h3>
+      <div id="photo-strip" class="photo-strip">
+        <label for="photo-input" class="photo-add">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          <span>撮る・選ぶ</span>
+        </label>
+      </div>
+      <input id="photo-input" class="visually-hidden" type="file" accept="image/*" multiple>
+      <p id="photo-status" class="help" hidden></p>
+    </section>
+
+    <section class="form-section" aria-labelledby="tag-h">
+      <h3 id="tag-h" class="section-title">タグ</h3>
+      <div id="tag-picker" class="tag-wrap"></div>
+      <div id="tag-add-row" class="tag-add-row" hidden>
+        <label class="visually-hidden" for="tag-new">新しいタグの名前</label>
+        <input id="tag-new" class="text-input" type="text" maxlength="20" placeholder="例：逆光が綺麗" enterkeyhint="done" autocomplete="off">
+        <button id="tag-new-ok" class="pill-btn accent" type="button">追加</button>
+      </div>
+    </section>
+
+    <section class="form-section">
+      <label for="f-title" class="section-title">場所の名前<span class="optional">任意</span></label>
+      <input id="f-title" class="text-input" type="text" maxlength="40" placeholder="例：駅前の歩道橋" autocomplete="off">
+    </section>
+
+    <section class="form-section">
+      <label for="f-memo" class="section-title">メモ<span class="optional">任意</span></label>
+      <textarea id="f-memo" class="text-area" rows="3" placeholder="例：夕方は西日が階段に差し込む。平日16時台は人が少ない。"></textarea>
+    </section>
+
+    <section class="form-section">
+      <label for="f-route" class="section-title">新宿・東京駅からの行き方<span class="optional">任意</span></label>
+      <textarea id="f-route" class="text-area" rows="3" placeholder="例：新宿駅 南口から徒歩8分。甲州街道を西へ。"></textarea>
+    </section>
+
+    <button id="record-save-bottom" class="big-btn primary" type="button" disabled>保存する</button>
   </div>
 </section>
 
 <!-- 詳細シート -->
-<section id="detail-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="detail-title" hidden>
+<section id="detail-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="detail-name" hidden>
   <div class="grabber" aria-hidden="true"></div>
   <div class="sheet-header">
-    <span class="spacer"></span>
-    <h2 id="detail-title">ロケ地</h2>
+    <button id="detail-edit" class="pill-btn" type="button">編集</button>
+    <span class="sheet-header-title" aria-hidden="true"></span>
     <button id="detail-close" class="pill-btn" type="button">閉じる</button>
   </div>
   <div class="sheet-body">
+    <div id="detail-photos" class="carousel" aria-label="写真"></div>
+    <p id="detail-photo-count" class="carousel-count num" hidden></p>
+
+    <div class="detail-head">
+      <h2 id="detail-name" class="detail-name"></h2>
+      <span id="detail-time" class="subtle num"></span>
+    </div>
+    <div id="detail-tags" class="tag-wrap"></div>
+
+    <div id="detail-memo-card" class="card text-card">
+      <h3>メモ</h3>
+      <p id="detail-memo"></p>
+    </div>
+    <div id="detail-route-card" class="card text-card">
+      <h3>新宿・東京駅からの行き方</h3>
+      <p id="detail-route"></p>
+    </div>
+
     <div class="card info-card">
-      <div class="info-row">
-        <div class="badge-icon neutral" aria-hidden="true">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-        </div>
-        <div class="info-text"><span id="detail-time" class="info-title num"></span></div>
-      </div>
-      <div class="sep"></div>
       <div class="info-row">
         <div class="badge-icon neutral" aria-hidden="true">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
@@ -168,11 +217,12 @@
         </div>
       </div>
     </div>
+
     <a id="detail-maps" class="big-btn secondary" href="#" target="_blank" rel="noopener">マップアプリで開く</a>
     <div id="delete-area">
       <button id="detail-delete" class="big-btn danger" type="button">この記録を削除</button>
       <div id="delete-confirm" class="confirm" hidden>
-        <p>この記録を削除します。元に戻せません。</p>
+        <p>この記録と写真を削除します。元に戻せません。</p>
         <div class="confirm-btns">
           <button id="delete-no" class="big-btn secondary" type="button">やめる</button>
           <button id="delete-yes" class="big-btn danger-fill" type="button">削除する</button>

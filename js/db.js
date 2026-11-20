@@ -79,3 +79,43 @@ export async function requestPersist() {
     }
   } catch (e) { /* 対応していない端末では何もしない */ }
 }
+
+/* ---------- 写真 ---------- */
+export function putPhoto(photo) {
+  return run('photos', 'readwrite', (s) => s.put(photo));
+}
+
+export function getPhoto(id) {
+  return run('photos', 'readonly', (s) => s.get(id));
+}
+
+export function deletePhoto(id) {
+  return run('photos', 'readwrite', (s) => s.delete(id));
+}
+
+// 記録と、その写真をまとめて削除
+export async function deleteSpotWithPhotos(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['spots', 'photos'], 'readwrite');
+    tx.objectStore('spots').delete(id);
+    const idx = tx.objectStore('photos').index('spotId');
+    const req = idx.openKeyCursor(IDBKeyRange.only(id));
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (cur) { tx.objectStore('photos').delete(cur.primaryKey); cur.continue(); }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/* ---------- 設定（タグ一覧など） ---------- */
+export async function getMeta(key, fallback) {
+  const row = await run('meta', 'readonly', (s) => s.get(key));
+  return row ? row.value : fallback;
+}
+
+export function setMeta(key, value) {
+  return run('meta', 'readwrite', (s) => s.put({ key, value }));
+}
